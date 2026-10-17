@@ -71,7 +71,7 @@
             <w-item
               v-for="str of state.activeStrategies"
               :key="str.id"
-              active-class="bg-primary text-white"
+              :active-class="dark.isActive ? `bg-primary text-white` : `bg-primary/15 text-primary`"
               :active="state.selectedStrategy === str.id"
               @click="state.selectedStrategy = str.id"
               clickable>

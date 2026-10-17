@@ -46,7 +46,7 @@
             <w-item
               v-for="prv of state.providers"
               :key="prv.key"
-              active-class="bg-primary text-white"
+              :active-class="dark.isActive ? `bg-primary text-white` : `bg-primary/15 text-primary`"
               :active="state.selectedProvider === prv.key"
               :to="`/_admin/` + adminStore.currentSiteId + `/analytics/` + prv.key"
               clickable>
@@ -331,7 +331,9 @@ function providerState(prv) {
 
 function subtitleColor(prv) {
   if (state.selectedProvider === prv.key) {
-    return 'text-blue-2'
+    // -> Pale blue reads on the filled row of the dark list; on the tinted row of the light one the
+    //    primary itself does, as the label beside it
+    return dark.isActive ? 'text-blue-2' : 'text-primary'
   } else if (prv.isEnabled) {
     return 'text-positive'
   } else {

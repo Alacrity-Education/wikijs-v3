@@ -48,7 +48,7 @@
             <w-item
               v-for="rdr of state.renderers"
               :key="rdr.key"
-              active-class="bg-primary text-white"
+              :active-class="dark.isActive ? `bg-primary text-white` : `bg-primary/15 text-primary`"
               :active="state.selectedRenderer === rdr.id"
               @click="state.selectedRenderer = rdr.id"
               clickable>
