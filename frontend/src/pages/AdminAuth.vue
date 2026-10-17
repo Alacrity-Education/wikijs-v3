@@ -66,8 +66,8 @@
     -->
     <div class="flex flex-wrap p-4 gap-4" v-if="state.displayMode === `strategies`">
       <div class="flex-none">
-        <w-card class="rounded bg-dark">
-          <w-list style="min-width: 350px" padding dark>
+        <w-card class="rounded" :class="dark.isActive ? `bg-dark` : `bg-white`">
+          <w-list style="min-width: 350px" padding :dark="dark.isActive">
             <w-item
               v-for="str of state.activeStrategies"
               :key="str.id"
