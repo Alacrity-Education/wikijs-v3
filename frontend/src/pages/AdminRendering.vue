@@ -43,8 +43,8 @@
     <w-separator inset />
     <div class="flex flex-wrap p-4 gap-4">
       <div class="flex-none">
-        <w-card class="rounded bg-dark">
-          <w-list style="min-width: 300px" padding dark>
+        <w-card class="rounded" :class="dark.isActive ? `bg-dark` : `bg-white`">
+          <w-list style="min-width: 300px" padding :dark="dark.isActive">
             <w-item
               v-for="rdr of state.renderers"
               :key="rdr.key"
@@ -75,6 +75,7 @@
 
 <script setup>
 import { useI18n } from 'vue-i18n'
+import { useDark } from '@/composables/dark'
 import { computed, onMounted, reactive, watch } from 'vue'
 
 import { useMeta } from '@/composables/meta'
@@ -90,6 +91,10 @@ const siteStore = useSiteStore()
 // I18N
 
 const { t } = useI18n()
+
+// DARK MODE
+
+const dark = useDark()
 
 // META
 
