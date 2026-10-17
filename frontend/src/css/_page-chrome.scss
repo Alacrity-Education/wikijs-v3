@@ -439,6 +439,11 @@ $toc-overlay-max: 749.98px;
   @at-root .body--dark & {
     border-top: 1px solid $dark-6;
   }
+
+  /* -> Stacked reading: no bars above the columns, so no hairline of daylight to separate them from */
+  &.page-container--flush {
+    border-top: 0;
+  }
 }
 
 /*
@@ -689,4 +694,19 @@ $toc-overlay-max: 749.98px;
 
 .page-stacked-heading {
   padding-bottom: 0.75rem;
+}
+
+/*
+  The page's title in the article, in place of the header band under the stacked layout. No band, no
+  gradient: the margin below keeps the first heading of the article off it.
+*/
+.page-inline-header {
+  margin-bottom: 1.5rem;
+  overflow-wrap: anywhere;
+}
+
+/* The path in the side column: long crumbs break rather than push the column wider */
+.page-sidebar-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

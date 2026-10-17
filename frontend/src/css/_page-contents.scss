@@ -98,28 +98,21 @@
   --content-surface-alt: rgba(0, 0, 0, 0.04);
 
   /*
-    The head of a table, drawn as a title bar: the graded near-black the app's own dialog headers use
-    (`.card-header` in `_base.scss`), so a table reads as a panel with a bar on top rather than as a
-    grid with tinted text in its first row. Literal values, because this file takes no SCSS palette.
+    The head of a table, drawn as a title bar, so a table reads as a panel with a bar on top rather than
+    as a grid with tinted text in its first row. Literal values, because this file takes no SCSS palette.
 
-    The near end of the grade -- the one the radial starts from, at bottom right -- is a step up the
-    app's dark ramp from what `.card-header` starts at: `$dark-2` here against its `$dark-3`. Against a
-    white page the whole bar reads darker than it measures, and at `$dark-3` the grade had nowhere to go
-    but flat. On a dark page it does not need the help, so the dark block puts `$dark-3` back.
-
-    The far end and the ink are the same in both themes, because a bar this dark is already the chrome
-    it is meant to be on either.
+    On the white page the bar is a light wash a step past `--content-surface-alt`, graded the way the
+    dark one is: a near-black bar on a light article made every table -- and every image a MultiMarkdown
+    author put in a head row, which is how a captioned picture is written -- into a dark block cut out
+    of the page. The dark theme keeps the graded near-black the app's own dialog headers use
+    (`.card-header` in `_base.scss`); see the dark block below, which sets all four.
   */
-  --content-table-head: #292f39;
-  --content-table-head-grade: #0d1117;
-  /*
-    Dimmed rather than pure white: the head labels the columns, and at full strength white on
-    near-black it reads louder than the content it introduces.
-  */
-  --content-table-head-ink: rgba(255, 255, 255, 0.82);
-  /* -> The grid lines INSIDE the bar, which `--content-rule` cannot draw: a 12%-black hairline is
-        invisible on near-black */
-  --content-table-head-rule: rgba(255, 255, 255, 0.12);
+  --content-table-head: #eef1f4;
+  --content-table-head-grade: #e3e7ec;
+  /* -> Dimmed rather than full black: the head labels the columns and should not outweigh them */
+  --content-table-head-ink: rgba(0, 0, 0, 0.8);
+  /* -> The grid lines INSIDE the bar, a touch stronger than `--content-rule` so they survive the wash */
+  --content-table-head-rule: rgba(0, 0, 0, 0.1);
   /*
     The body's two row colours. The plain row is tinted too, faintly: on the white article column an
     untinted row IS the page, and a table whose rows are half page and half band reads as stripes drawn
@@ -322,9 +315,15 @@
       --content-table-row: rgba(255, 255, 255, 0.02);
       --content-table-row-alt: rgba(255, 255, 255, 0.055);
 
-      /* -> Back to `.card-header`'s own near end: on a dark page the bar reads as dark as it measures,
-            and the extra step the light theme needs would leave the head sitting above the page */
+      /* -> The graded near-black the app's own dialog headers use (`.card-header` in `_base.scss`):
+            on a dark page a dark bar is the chrome it is meant to be, where the light page gets a wash */
       --content-table-head: #1e232a;
+      --content-table-head-grade: #0d1117;
+      /* -> Dimmed rather than pure white: at full strength white on near-black reads louder than the
+            content it introduces */
+      --content-table-head-ink: rgba(255, 255, 255, 0.82);
+      /* -> A 12%-black hairline is invisible on near-black, so the bar's own grid is white */
+      --content-table-head-rule: rgba(255, 255, 255, 0.12);
 
       --content-mark: #6b5d13;
 
