@@ -2066,6 +2066,37 @@
     text-align: center;
   }
 
+  /*
+    A Wiki.js 2 draw.io diagram (a ```diagram fence, see `codeBlock`): an SVG in an `<img>`. The SVG
+    often carries `color-scheme: light dark` with dark text and no background, so on the dark theme it
+    is set on a light surface rather than left to vanish into the page.
+  */
+  figure.diagram {
+    margin: 1.5em 0;
+    border: 0;
+  }
+
+  img.diagram-image {
+    max-width: 100%;
+    height: auto;
+    background: transparent;
+    /*
+      draw.io exports its colours as `light-dark()` pairs under a root `color-scheme: light dark`, and an
+      SVG drawn by an <img> takes its scheme from the element embedding it -- which, left alone, is the
+      reader's OS preference rather than the wiki's theme, so a light wiki on a dark desktop showed every
+      diagram in its dark variant. Pinned to light in both themes: on the dark theme it sits on the white
+      surface below, which also keeps a diagram exported without the pairs (black text, no background)
+      readable.
+    */
+    color-scheme: light;
+
+    @at-root .body--dark & {
+      background: #fff;
+      padding: 8px;
+      border-radius: 8px;
+    }
+  }
+
   figcaption {
     margin-top: 0.6em;
     color: var(--content-ink-muted);

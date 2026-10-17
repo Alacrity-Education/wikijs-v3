@@ -241,7 +241,8 @@ export const DIAGRAM_LANGUAGES = ['kroki', 'mermaid', 'plantuml']
 export const MATH_ENGINES = ['katex', 'mathjax']
 
 /**
- * One fence, as the markup it is drawn as -- always rooted at a `<pre>`, whatever it holds.
+ * One fence, as the markup it is drawn as -- rooted at a `<pre>`, whatever it holds, except for a
+ * Wiki.js 2 `diagram` fence, which is a `<figure>` holding the picture.
  *
  * @param {string} str The code, as the author wrote it.
  * @param {string} lang The first word of the info string.
@@ -250,6 +251,29 @@ export const MATH_ENGINES = ['katex', 'mathjax']
  *                            no gutter, no title bar and no lines to mark.
  */
 export function codeBlock(str, lang, attributes) {
+  if (lang === 'diagram') {
+    /*
+      Wiki.js 2 compatibility. v2 stored a draw.io diagram as a ```diagram fence whose body is the base64
+      of an SVG exported in draw.io's `xmlsvg` format (the mxfile model rides in the SVG's root `content`
+      attribute, so it can be edited again). It is drawn here as an `<img>` with a data URI rather than as
+      inline SVG: the server's sanitizer drops `foreignObject` (where draw.io puts its labels) and `script`
+      from inline SVG, and an image also keeps the diagram's own scripts and styles out of the page. `data:`
+      is allowed on `img` only, so the picture survives the round trip.
+
+      A body that is not base64 of an SVG falls through to an ordinary code block, so a broken fence stays
+      visible rather than vanishing.
+    */
+    const encoded = str.replace(/\s+/g, '')
+    try {
+      const svg = atob(encoded)
+      if (/^(?:\uFEFF)?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(svg)) {
+        return `<figure class="diagram"><img class="diagram-image" src="data:image/svg+xml;base64,${encoded}" alt=""></figure>`
+      }
+    } catch {
+      // -> not base64: shown as code below
+    }
+  }
+
   if (DIAGRAM_LANGUAGES.includes(lang)) {
     /*
       Left as source, deliberately: a diagram is drawn by the block whose body it is —

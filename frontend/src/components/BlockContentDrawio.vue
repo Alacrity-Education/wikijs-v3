@@ -51,6 +51,25 @@ import { useDark } from '@/composables/dark'
  * drawing as it stands; `save` is the same thing plus "and close", which is what the author means by
  * pressing it. Nothing is ever uploaded: an embedded draw.io does its work in the browser, and the XML
  * arrives here rather than at whoever is hosting the editor.
+ *
+ * There are two formats, picked by the `format` prop, and they differ in what `modelValue` holds and
+ * in how the drawing is taken out of draw.io:
+ *
+ *   `xml` (default)  the model is draw.io's own XML document. The drawing is loaded with `autosave`
+ *                    on and every `autosave` / `save` event updates the model, so a host with its own
+ *                    Apply button always has the drawing as it stands. `save` also emits `save`.
+ *   `svg`            the model is a complete SVG that embeds the drawing in its root `content`
+ *                    attribute (draw.io's `xmlsvg` export, which is what Wiki.js 2.x stored, base64
+ *                    encoded, in a `diagram` fence). It is loaded with `autosave` off and
+ *                    `saveAndExit` on, because producing the SVG is an asynchronous round trip and
+ *                    only a deliberate Save is worth one:
+ *                      in   `{ event: 'save' }`      -> out `{ action: 'export', format: 'xmlsvg' }`
+ *                      in   `{ event: 'export', data: 'data:image/svg+xml;base64,…' }`
+ *                           -> `update:modelValue` with the decoded SVG text, then `save`
+ *                      in   `{ event: 'exit' }`      -> `exit` (Save exits too; so does closing it)
+ *
+ * Emits: `update:modelValue`, `save`, and `exit` (svg mode only; the xml format never asks draw.io for
+ * a way out of its own, see `noExitBtn`).
  */
 
 // PROPS
@@ -78,12 +97,18 @@ const props = defineProps({
   lang: {
     type: String,
     default: ''
+  },
+  /** What `modelValue` holds: draw.io's XML (`xml`), or a complete SVG embedding it (`svg`). */
+  format: {
+    type: String,
+    default: 'xml',
+    validator: (value) => ['xml', 'svg'].includes(value)
   }
 })
 
 // EMITS
 
-const emit = defineEmits(['update:modelValue', 'save'])
+const emit = defineEmits(['update:modelValue', 'save', 'exit'])
 
 /**
  * The draw.io that answers when the block names none.
@@ -118,6 +143,18 @@ const state = reactive({
 
 let readyTimer = null
 
+// -> svg mode: `save` has asked for an export that has not come back, and an `exit` that arrives in
+//    that window is held until it has, or the host would close on a drawing it never received
+let exportPending = false
+let exitAfterExport = false
+/*
+  How long an export may take before it is given up on. draw.io answers one in well under a second;
+  without a limit, an `exit` held for an export that never comes would hold the author in a drawing
+  they have already left, with the overlay's own Close as the only way out.
+*/
+const EXPORT_TIMEOUT = 15000
+let exportTimer = null
+
 // COMPUTED
 
 const server = computed(() => String(props.params.server || '').trim() || PUBLIC_EDITOR)
@@ -131,6 +168,8 @@ const origin = computed(() => {
   }
 })
 
+const isSvg = computed(() => props.format === 'svg')
+
 const editorUrl = computed(() => {
   /*
     `ui` is settled once, when the frame is built, and deliberately does not follow the reader
@@ -143,9 +182,10 @@ const editorUrl = computed(() => {
     spin: '1',
     libraries: '1',
     // -> The overlay's own Cancel is the way out, and two of them beside each other say different
-    //    things about the unsaved drawing
-    noExitBtn: '1',
-    saveAndExit: '0',
+    //    things about the unsaved drawing. An svg drawing is the exception: its host has no Apply
+    //    button, and draw.io's own Save and Exit are the whole of the way out
+    noExitBtn: isSvg.value ? '0' : '1',
+    saveAndExit: isSvg.value ? '1' : '0',
     ui: dark.isActive ? 'dark' : 'kennedy'
   })
   return `${server.value.replace(/\/+$/, '')}/?${params.toString()}`
@@ -155,6 +195,12 @@ const editorUrl = computed(() => {
 
 function post(message) {
   frameEl.value?.contentWindow?.postMessage(JSON.stringify(message), origin.value || '*')
+}
+
+/** The text of a `data:…;base64,` URI, decoded as UTF-8 (`atob` alone gives one character per byte). */
+function decodeDataUri(uri) {
+  const base64 = String(uri ?? '').replace(/^data:[^,]*,/, '')
+  return new TextDecoder().decode(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)))
 }
 
 /**
@@ -183,14 +229,63 @@ function onMessage(event) {
       state.ready = true
       clearTimeout(readyTimer)
       // -> `autosave` is what makes the frame report every change, which is what Apply relies on
-      post({ action: 'load', autosave: 1, xml: props.modelValue })
+      if (isSvg.value) {
+        // -> `xml` accepts a complete SVG that embeds the model as well as mxfile XML; empty is a new drawing
+        post({ action: 'load', autosave: 0, saveAndExit: 1, xml: props.modelValue })
+      } else {
+        post({ action: 'load', autosave: 1, xml: props.modelValue })
+      }
       break
     case 'autosave':
       emit('update:modelValue', message.xml ?? '')
       break
     case 'save':
+      if (isSvg.value) {
+        // -> The model arrives as `export`; the XML this event carries is not what is stored
+        exportPending = true
+        clearTimeout(exportTimer)
+        exportTimer = setTimeout(() => {
+          exportPending = false
+          if (exitAfterExport) {
+            exitAfterExport = false
+            emit('exit')
+          }
+        }, EXPORT_TIMEOUT)
+        post({ action: 'export', format: 'xmlsvg', spin: 'Saving' })
+        break
+      }
       emit('update:modelValue', message.xml ?? '')
       emit('save')
+      break
+    case 'export':
+      // -> draw.io answers an `xmlsvg` export as `format: 'svg'` (the request it echoes under `message`
+      //    is what still says `xmlsvg`), so either spelling is the answer being waited for
+      if (isSvg.value && (message.format === 'svg' || message.format === 'xmlsvg')) {
+        exportPending = false
+        clearTimeout(exportTimer)
+        try {
+          emit('update:modelValue', decodeDataUri(message.data))
+          emit('save')
+        } catch {
+          // -> Not a base64 data URI: nothing usable came back, so neither the model nor `save`
+          //    change -- and an exit held for this export is dropped too, since leaving now would
+          //    lose the drawing without a word
+          exitAfterExport = false
+        }
+        if (exitAfterExport) {
+          exitAfterExport = false
+          emit('exit')
+        }
+      }
+      break
+    case 'exit':
+      if (isSvg.value) {
+        if (exportPending) {
+          exitAfterExport = true
+        } else {
+          emit('exit')
+        }
+      }
       break
   }
 }
@@ -207,6 +302,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('message', onMessage)
   clearTimeout(readyTimer)
+  clearTimeout(exportTimer)
 })
 </script>
 

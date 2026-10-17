@@ -479,11 +479,12 @@ export class MarkdownRenderer {
         theme an administrator picks is injected as bare `.hljs` rules setting a background and an ink,
         so the box has to be able to take them or the bar would stay light over a dark panel.
       */
-      if (title) {
+      if (title && html.startsWith('<pre')) {
         return `<div class="codeblock-titled hljs"${line}><div class="codeblock-title">${escape(title)}</div>${html}</div>\n`
       }
-      // -> Every branch of `codeBlock` opens with `<pre`
-      return `${html.replace(/^<pre/, `<pre${line}`)}\n`
+      // -> Every branch of `codeBlock` opens with `<pre`, bar a `diagram` fence's `<figure>`, which has no
+      //    title bar to hold and takes the line stamp the same way
+      return `${html.replace(/^<(pre|figure)/, `<$1${line}`)}\n`
     }
 
     // --------------------------------

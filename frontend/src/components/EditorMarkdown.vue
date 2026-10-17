@@ -39,6 +39,11 @@
             t('editor.markup.insertBlock')
           }}</w-tooltip>
         </w-btn>
+        <w-btn icon="mdi:shape-plus-outline" padding="sm sm" flat @click="insertDiagram">
+          <w-tooltip anchor="center right" self="center left">{{
+            t('editor.markup.insertDiagram')
+          }}</w-tooltip>
+        </w-btn>
         <w-btn icon="mdi:format-list-group-plus" padding="sm sm" flat @click="insertDefinitionList">
           <w-tooltip anchor="center right" self="center left">{{
             t('editor.markup.insertDefinitionList')
@@ -386,6 +391,7 @@ import { findImages, imageValues, writeImage } from '@/helpers/markdownImages'
 import { findEditableTables, tableRowToAdd, tableWithColumnAdded } from '@/helpers/markdownTable'
 import { scrollBehavior } from '@/helpers/motion'
 
+import EditorDiagramOverlay from '@/components/EditorDiagramOverlay.vue'
 import EditorCodeBlockMenu from '@/components/EditorCodeBlockMenu.vue'
 import EditorEmojiMenu from '@/components/EditorEmojiMenu.vue'
 import IconPickerDialog from '@/components/IconPickerDialog.vue'
@@ -1048,6 +1054,134 @@ function insertLink() {
         forceMoveMarkers: true
       }
     ])
+    editor.focus()
+  })
+}
+
+/**
+ * The `diagram` fence around a line, if any: `{ startLine, endLine, svg }`, with `svg` the drawing the
+ * fence's base64 body decodes to (null when the body is not base64 of UTF-8 text).
+ *
+ * Walked from the top of the model, tracking fences the way a renderer reads them, so that a `diagram`
+ * opener inside some other fence is text and a closer is matched to the opener it belongs to. A fence
+ * that is never closed does not count: there is no end to replace.
+ */
+function diagramFenceAt(model, lineNumber) {
+  let open = null
+  for (let line = 1; line <= model.getLineCount(); line++) {
+    const text = model.getLineContent(line)
+    if (!open) {
+      // -> Tilde fences are tracked too, so a diagram opener quoted inside one is not taken for real
+      const opener = /^ {0,3}(`{3,}|~{3,})\s*(\S*)/.exec(text)
+      if (opener && !(opener[1][0] === '`' && opener[2].includes('`'))) {
+        open = {
+          line,
+          mark: opener[1][0],
+          ticks: opener[1].length,
+          isDiagram: opener[1][0] === '`' && opener[2] === 'diagram'
+        }
+      }
+    } else if (new RegExp(`^ {0,3}\\${open.mark}{${open.ticks},}\\s*$`).test(text)) {
+      if (open.isDiagram && open.line <= lineNumber && lineNumber <= line) {
+        const body = model.getValueInRange(new Range(open.line + 1, 1, line, 1)).replace(/\s+/g, '')
+        let svg = null
+        try {
+          svg = base64ToText(body)
+        } catch {
+          // -> Left null: the caller says so rather than opening an empty drawing over it
+        }
+        return { startLine: open.line, endLine: line, svg }
+      }
+      open = null
+    }
+  }
+  return null
+}
+
+/** Base64 of UTF-8 bytes, to text. `atob` alone gives one character per byte. */
+function base64ToText(base64) {
+  return new TextDecoder('utf-8', { fatal: true }).decode(
+    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+  )
+}
+
+/** Text to base64 of its UTF-8 bytes, in chunks so a large drawing does not overflow the call stack. */
+function textToBase64(text) {
+  const bytes = new TextEncoder().encode(text)
+  const CHUNK_SIZE = 0x8000
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK_SIZE))
+  }
+  return btoa(binary)
+}
+
+/**
+ * A draw.io diagram, in a `diagram` fence the way Wiki.js 2.x wrote them: the SVG draw.io exports,
+ * which carries the drawing it can be re-opened from, as base64.
+ *
+ * With the caret inside such a fence this edits it and the whole fence, opener to closer, is replaced;
+ * anywhere else it draws a new one and the fence is inserted at the caret, on lines of its own.
+ */
+function insertDiagram() {
+  const model = editor.getModel()
+  const cursor = editor.getPosition()
+  const existing = diagramFenceAt(model, cursor.lineNumber)
+  if (existing && existing.svg === null) {
+    notify({ type: 'negative', message: t('editor.diagram.invalid') })
+    return
+  }
+  dialog({
+    component: EditorDiagramOverlay,
+    componentProps: { svg: existing?.svg ?? '' }
+  }).onOk((svg) => {
+    const fence = `\`\`\`diagram\n${textToBase64(svg)}\n\`\`\``
+    if (existing) {
+      // -> Looked up again: the dialog was open for as long as the author was drawing, and the page
+      //    may have been edited by somebody else in the meantime, or the fence moved
+      const now = diagramFenceAt(model, Math.min(existing.startLine, model.getLineCount()))
+      if (!now || now.svg !== existing.svg) {
+        // -> Not the fence that was opened: replacing by its old lines would overwrite whatever is
+        //    there now, so nothing is written and the author is told
+        notify({ type: 'negative', message: t('editor.diagram.moved') })
+        return
+      }
+      const target = now
+      editor.executeEdits('diagram', [
+        {
+          range: new Range(
+            target.startLine,
+            1,
+            target.endLine,
+            model.getLineMaxColumn(target.endLine)
+          ),
+          text: fence,
+          forceMoveMarkers: true
+        }
+      ])
+      editor.setPosition(new Position(target.startLine, 1))
+    } else {
+      const position = editor.getPosition() ?? cursor
+      const before =
+        model
+          .getLineContent(position.lineNumber)
+          .slice(0, position.column - 1)
+          .trim().length > 0
+          ? '\n\n'
+          : ''
+      editor.executeEdits('diagram', [
+        {
+          range: new Range(
+            position.lineNumber,
+            position.column,
+            position.lineNumber,
+            position.column
+          ),
+          text: `${before}${fence}\n\n`,
+          forceMoveMarkers: true
+        }
+      ])
+    }
     editor.focus()
   })
 }
