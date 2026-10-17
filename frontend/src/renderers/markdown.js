@@ -440,7 +440,7 @@ export class MarkdownRenderer {
       `title` becomes a header bar above the block; `linesStart` renumbers the gutter; `linesHighlight`
       washes the rows it names. See `codeBlock` for the last two and `parseFenceAttributes` for the
       shape of all three. A diagram fence ignores them -- it is a source for something else to draw.
-      A `wavedrom` fence takes `skin`, `caption` and `align` instead, as the props of the block it is
+      A self-drawing fence (```mermaid, ```wavedrom) takes its block's props instead, as the block it is
       wrapped in.
 
       The line the fence sits on is stamped into the markup rather than onto the token, since the token
@@ -510,9 +510,9 @@ export class MarkdownRenderer {
         return `<div class="codeblock-titled hljs"${line}><div class="codeblock-title">${escape(title)}</div>${html}</div>\n`
       }
       // -> Every branch of `codeBlock` opens with `<pre`, bar a `diagram` fence's `<figure>` and a
-      //    `wavedrom` fence's `<block-wavedrom>`, neither of which has a title bar to hold -- a title on
+      //    self-drawing fence's block (`SELF_DRAWING_FENCES`), neither of which has a title bar to hold -- a title on
       //    one is ignored -- and both take the line stamp the same way
-      return `${html.replace(/^<(pre|figure|block-wavedrom)/, `<$1${line}`)}\n`
+      return `${html.replace(/^<(pre|figure|block-[a-z]+)/, `<$1${line}`)}\n`
     }
 
     // --------------------------------

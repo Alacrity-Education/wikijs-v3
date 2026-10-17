@@ -235,6 +235,16 @@ function lineRows(lineCount, lineStart, highlights) {
 export const DIAGRAM_LANGUAGES = ['kroki', 'mermaid', 'plantuml']
 
 /**
+ * The fence languages that draw themselves when written bare, each with the block that draws it and
+ * the props of that block a fence may set from its info string. See `codeBlock`.
+ */
+export const SELF_DRAWING_FENCES = {
+  mermaid: { tag: 'block-diagram', props: ['caption', 'theme', 'align'] },
+  plantuml: { tag: 'block-plantuml', props: ['server', 'format', 'caption', 'align'] },
+  wavedrom: { tag: 'block-wavedrom', props: ['skin', 'caption', 'align'] }
+}
+
+/**
  * The blocks able to typeset a TeX formula, by the name a site's editor settings choose one with —
  * `inlineMath` for markdown, `math` for AsciiDoc. The element is `block-<name>` either way.
  */
@@ -242,8 +252,8 @@ export const MATH_ENGINES = ['katex', 'mathjax']
 
 /**
  * One fence, as the markup it is drawn as -- rooted at a `<pre>`, whatever it holds, except for a
- * Wiki.js 2 `diagram` fence, which is a `<figure>` holding the picture, and a `wavedrom` fence, which
- * is a `<block-wavedrom>` holding the source.
+ * Wiki.js 2 `diagram` fence, which is a `<figure>` holding the picture, and a self-drawing fence
+ * (`SELF_DRAWING_FENCES`), which is the block that draws it holding the source.
  *
  * @param {string} str The code, as the author wrote it.
  * @param {string} lang The first word of the info string.
@@ -252,32 +262,36 @@ export const MATH_ENGINES = ['katex', 'mathjax']
  *                            no gutter, no title bar and no lines to mark.
  * @param {object} [options]
  * @param {string|null} [options.insideBlock] The tag of the nearest block container the fence sits in,
- *                            or null at the top level. Only the `wavedrom` branch asks.
+ *                            or null at the top level. Only the self-drawing branch asks.
  */
 export function codeBlock(str, lang, attributes, options = {}) {
-  if (lang === 'wavedrom') {
+  const selfDrawing = SELF_DRAWING_FENCES[lang]
+  if (selfDrawing) {
     /*
-      A bare ```wavedrom fence draws itself: it is wrapped in the `block-wavedrom` that reads the
-      source out of the `pre`, so an author need not know a block is involved. The three props the block
-      declares are taken from the fence's own attributes -- ```wavedrom skin=dark caption="SPI write",
-      unbraced like every fence option, since `markdown-it-attrs` claims a braced group for itself --
-      and left off when absent, so the block's defaults stay the block's.
+      A bare ```mermaid or ```wavedrom fence draws itself: it is wrapped in the block that reads the
+      source out of the `pre`, so an author need not know a block is involved -- which is also what a
+      page written for Wiki.js 2 expects, where a mermaid fence was a diagram on its own. The props the
+      block declares are taken from the fence's own attributes -- ```wavedrom skin=dark caption="SPI
+      write", unbraced like every fence option, since `markdown-it-attrs` claims a braced group for
+      itself -- and left off when absent, so the block's defaults stay the block's.
 
-      Written inside a `:::block-wavedrom` the author already supplied the block, and a second one in
-      its body would draw the diagram twice, nested; there only the `pre` is returned. Not in
-      `DIAGRAM_LANGUAGES`, which are left bare for an enclosing block to draw.
+      Written inside the block already (`:::block-diagram` around a mermaid fence, which is what the
+      block picker writes), a second one in its body would draw the diagram twice, nested; there only
+      the `pre` is returned, which is the bare form `DIAGRAM_LANGUAGES` below keeps for every language
+      an enclosing block has to draw. Kroki stays there: its block needs a `type` nothing in the fence
+      says.
     */
-    const pre = `<pre class="codeblock-wavedrom"><code>${escape(str)}</code></pre>`
-    if (options.insideBlock === 'block-wavedrom') {
+    const pre = `<pre class="codeblock-${lang}"><code>${escape(str)}</code></pre>`
+    if (options.insideBlock === selfDrawing.tag) {
       return pre
     }
-    const props = ['skin', 'caption', 'align']
+    const props = selfDrawing.props
       // -> Absent is absent whichever parser asked: markdown's gives `undefined`, asciidoctor's may
       //    answer `null`, and an empty value says nothing either
       .filter((key) => attributes?.[key] != null && attributes[key] !== '')
       .map((key) => ` ${key}="${escape(attributes[key])}"`)
       .join('')
-    return `<block-wavedrom${props}>${pre}</block-wavedrom>`
+    return `<${selfDrawing.tag}${props}>${pre}</${selfDrawing.tag}>`
   }
 
   if (lang === 'diagram') {

@@ -476,9 +476,10 @@ ${await node.content()}
    * `highlight` accepts AsciiDoc's `1..2` and markdown's `1-2` alike -- the dots are rewritten to a
    * hyphen on the way in, since nobody arriving from a markdown page will write two of them.
    *
-   * A `wavedrom` listing takes `skin`, `caption` and `align` the same way -- `[source,wavedrom,skin=dark]`
-   * -- as the props of the `<block-wavedrom>` it becomes, and is left as a bare `<pre>` when it sits
-   * inside a `[block-wavedrom]` block, which draws it.
+   * A self-drawing listing (`[source,mermaid]`, `[source,wavedrom]`) takes its block's props the same
+   * way -- `[source,wavedrom,skin=dark]`
+   * -- as the props of the block it becomes (`SELF_DRAWING_FENCES`), and is left as a bare `<pre>` when
+   * it sits inside that block, which draws it.
    */
   async convert_listing(node) {
     /*
@@ -495,7 +496,11 @@ ${await node.content()}
       {
         linesstart: node.getAttribute('start'),
         lineshighlight: (node.getAttribute('highlight') ?? '').replaceAll('..', '-'),
+        // -> The props a self-drawing listing may set, across the blocks `SELF_DRAWING_FENCES` names
         skin: node.getAttribute('skin'),
+        theme: node.getAttribute('theme'),
+        server: node.getAttribute('server'),
+        format: node.getAttribute('format'),
         caption: node.getAttribute('caption'),
         align: node.getAttribute('align')
       },
@@ -511,9 +516,9 @@ ${await node.content()}
     if (title && html.startsWith('<pre')) {
       return `<div class="codeblock-titled hljs"${line}><div class="codeblock-title">${title}</div>${html}</div>`
     }
-    // -> Every branch of `codeBlock` opens with `<pre`, bar a `wavedrom` listing's `<block-wavedrom>`,
+    // -> Every branch of `codeBlock` opens with `<pre`, bar a self-drawing listing's block,
     //    which has no title bar to hold and takes the line stamp the same way
-    return html.replace(/^<(pre|block-wavedrom)/, `<$1${line}`)
+    return html.replace(/^<(pre|block-[a-z]+)/, `<$1${line}`)
   }
 
   /**
