@@ -221,6 +221,7 @@ export const useSiteStore = defineStore('site', {
       contentWidth: 'full',
       sidebarPosition: 'left',
       tocPosition: 'right',
+      pageLayout: 'classic',
       showPrintBtn: true,
       showPageProgress: true,
       pageTransitions: true

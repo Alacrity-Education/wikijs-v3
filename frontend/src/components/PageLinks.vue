@@ -1,6 +1,8 @@
 <template>
-  <div class="page-links">
-    <div class="flex items-center pb-2">
+  <div class="page-links" :class="{ 'is-embedded': embedded }">
+    <!-- -> Not drawn when embedded: the parent's section heading says what is below, and the
+            number is its to show (`count`, exposed) -->
+    <div class="flex items-center pb-2" v-if="!embedded">
       <w-icon class="mr-2" name="la:link" color="grey" />
       <div class="text-caption text-grey-7">{{ t('common.links.title') }}</div>
       <w-space />
@@ -11,7 +13,7 @@
       </div>
       <w-spinner class="ml-2" v-if="state.loading" color="primary" size="sm" />
     </div>
-    <w-separator />
+    <w-separator v-if="!embedded" />
     <div class="py-6 text-center text-body2 text-grey-6" v-if="state.loading && !state.loaded">
       {{ t('common.links.loading') }}
     </div>
@@ -69,7 +71,7 @@ import { useSiteStore } from '@/stores/site'
 import { apiErrorMessage } from '@/helpers/apiError'
 
 /**
- * The Links tab: every page of this wiki that points at the one being read.
+ * The Links view (classic layout) or section (stacked layout): every page of this wiki that points at the one being read.
  *
  * Beside the article rather than under it, for the reason the talk page is (`pages/Index.vue`): what
  * links here is a view OF the page, and a list that could run to hundreds of rows is not something to
@@ -80,6 +82,20 @@ import { apiErrorMessage } from '@/helpers/apiError'
  * listing one would hand over the existence of a page they cannot open. So there is nothing to hide
  * here, and nothing here may be relied on to hide anything.
  */
+
+defineProps({
+  /**
+   * Drops the view-level title bar and separator, for sitting under a section heading provided by
+   * the parent (stacked layout, below the article and the discussion).
+   */
+  embedded: {
+    type: Boolean,
+    default: false
+  }
+})
+
+/** Fired every time a load finishes, with the number of linking pages. */
+const emit = defineEmits(['loaded'])
 
 // STORES
 
@@ -126,6 +142,9 @@ const pages = computed(() => {
   )
 })
 
+/** How many pages link here, once each. Lets a parent hide the whole section while it is 0. */
+const count = computed(() => pages.value.length)
+
 // METHODS
 
 /**
@@ -161,6 +180,7 @@ async function load() {
     })
   }
   state.loading = false
+  emit('loaded', count.value)
 }
 
 // MOUNTED
@@ -176,6 +196,10 @@ watch(
   () => pageStore.id,
   () => load()
 )
+
+// EXPOSED
+
+defineExpose({ count })
 </script>
 
 <style lang="scss">
@@ -187,6 +211,11 @@ watch(
 */
 .page-links {
   color: #26292e;
+
+  /* -> The heading's own spacing is the parent's */
+  &.is-embedded .page-links-grid {
+    padding-top: 0;
+  }
 
   @at-root .body--dark & {
     color: rgba(255, 255, 255, 0.87);

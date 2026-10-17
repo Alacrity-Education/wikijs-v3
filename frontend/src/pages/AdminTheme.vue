@@ -305,6 +305,23 @@
             </w-item-section>
           </w-item>
           <w-separator class="my-2" inset />
+          <w-item>
+            <blueprint-icon icon="index" />
+            <w-item-section>
+              <w-item-label>{{ t(`admin.theme.pageLayout`) }}</w-item-label>
+              <w-item-label caption>{{ t(`admin.theme.pageLayoutHint`) }}</w-item-label>
+            </w-item-section>
+            <w-item-section class="flex-none">
+              <w-btn-toggle
+                v-model="state.config.pageLayout"
+                push
+                glossy
+                no-caps
+                toggle-color="primary"
+                :options="pageLayoutOptions" />
+            </w-item-section>
+          </w-item>
+          <w-separator class="my-2" inset />
           <w-item tag="label">
             <blueprint-icon icon="print" />
             <w-item-section>
@@ -440,6 +457,7 @@ function defaultConfig() {
     contentWidth: 'full',
     sidebarPosition: 'left',
     tocPosition: 'right',
+    pageLayout: 'classic',
     showPrintBtn: true,
     showPageProgress: true,
     pageTransitions: true,
@@ -459,6 +477,11 @@ const colorKeys = ['primary', 'secondary', 'accent', 'header', 'sidebar']
 const widthOptions = computed(() => [
   { label: t('admin.theme.contentWidthFull'), value: 'full' },
   { label: t('admin.theme.contentWidthCentered'), value: 'centered' }
+])
+
+const pageLayoutOptions = computed(() => [
+  { label: t('admin.theme.pageLayoutClassic'), value: 'classic' },
+  { label: t('admin.theme.pageLayoutStacked'), value: 'stacked' }
 ])
 
 const rightLeftOptions = computed(() => [
@@ -865,6 +888,7 @@ async function save() {
       contentWidth: state.config.contentWidth,
       sidebarPosition: state.config.sidebarPosition,
       tocPosition: state.config.tocPosition,
+      pageLayout: state.config.pageLayout,
       showPrintBtn: state.config.showPrintBtn,
       showPageProgress: state.config.showPageProgress,
       pageTransitions: state.config.pageTransitions,

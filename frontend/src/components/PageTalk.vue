@@ -1,5 +1,5 @@
 <template>
-  <div class="page-talk" :class="{ 'is-inline': inline }">
+  <div class="page-talk" :class="{ 'is-inline': inline, 'is-embedded': embedded }">
     <div class="page-talk-inline-title" v-if="inline">
       <w-icon name="la:comments" />
       <span class="pl-2">{{ t('common.feedback.discussion') }}</span>
@@ -191,6 +191,19 @@ const props = defineProps({
   inline: {
     type: Boolean,
     default: false
+  },
+  /**
+   * Sits under a section heading provided by the parent, below the visible article (stacked layout):
+   * drops the centred 900px measure, since the article column already sets the width.
+   */
+  embedded: {
+    type: Boolean,
+    default: false
+  },
+  /** Bumped by the parent whenever the article's DOM is rewritten without `pageStore.render` changing. */
+  contentRevision: {
+    type: Number,
+    default: 0
   }
 })
 
@@ -346,7 +359,7 @@ const threads = computed(() => {
 
 // -> After the DOM has caught up, since what is being searched is the article as drawn
 watch(
-  () => [state.comments, pageStore.render, props.contentRoot],
+  () => [state.comments, pageStore.render, props.contentRoot, props.contentRevision],
   () => findAnnotations(),
   { flush: 'post' }
 )
@@ -734,7 +747,8 @@ defineExpose({
   canStartAnnotation,
   annotationCount,
   startNewComment,
-  // -> For a feedback idea's status change, which may have posted a comment from outside this view
+  // -> For a feedback idea's status change, which may have posted a comment from outside this view,
+  //    and for the stacked layout, whose discussion stays mounted while one is posted from outside it
   reload: load
 })
 </script>
@@ -753,6 +767,11 @@ defineExpose({
   max-width: 900px;
   margin-inline: auto;
   color: #26292e;
+
+  &.is-embedded {
+    max-width: none;
+    margin-inline: 0;
+  }
 
   @at-root .body--dark & {
     color: rgba(255, 255, 255, 0.87);
