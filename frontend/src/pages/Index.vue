@@ -17,7 +17,7 @@
       class="page-breadcrumbs py-1 px-4 sm:py-2 flex flex-wrap"
       :lang="commonStore.locale"
       :dir="siteStore.localeDir(commonStore.locale)"
-      v-if="!editorStore.isActive && !pageStore.notFound">
+      v-if="!editorStore.isActive && !pageStore.notFound && !chromeInSidebar">
       <div class="min-w-0 flex-1">
         <w-breadcrumbs
           :items="breadcrumbs"
@@ -55,8 +55,13 @@
         </div>
       </div>
     </div>
+    <!--
+      Stacked layout, reading: the title is drawn at the top of the article instead (`page-inline-header`)
+      and the path in the side column, so neither bar is rendered. The editor keeps the band, since the
+      title and description fields and the save / close buttons live in it.
+    -->
     <page-header
-      v-if="!pageStore.notFound"
+      v-if="!pageStore.notFound && !chromeInSidebar"
       :actions-in-sidebar="actionsInSidebar"
       :class="{ 'is-aligned': headerBounds !== null }"
       :style="
@@ -70,7 +75,10 @@
     <!-- -> `min-h-0` so the columns inside can be shorter than their content and scroll -->
     <div
       class="page-container flex min-h-0 flex-nowrap items-stretch"
-      :class="{ 'page-container--toc-left': tocColumnIsLeft }"
+      :class="{
+        'page-container--toc-left': tocColumnIsLeft,
+        'page-container--flush': chromeInSidebar
+      }"
       style="flex: 1 1 100%">
       <!--
         `flex flex-col min-h-0`: the strip below is fixed to the top of this column and the scrolling
@@ -198,6 +206,28 @@
               itself and what follows.
             -->
             <site-banner v-if="activeView === `article`" />
+            <!--
+              The page's title, in the article so it scrolls with it. Stacked layout while reading only:
+              the header band is not drawn there, and the editor keeps the band.
+            -->
+            <div class="page-measure" v-if="chromeInSidebar">
+              <div class="page-inline-header flex items-start gap-3" :lang="pageStore.locale">
+                <w-icon
+                  class="flex-none rounded"
+                  :class="pageIconColorClass(pageStore.iconColor)"
+                  :name="pageStore.icon"
+                  size="40px" />
+                <div class="min-w-0 flex-1">
+                  <div class="text-h4 page-header-title" :dir="pageDir">{{ pageStore.title }}</div>
+                  <div
+                    class="text-subtitle2 page-header-subtitle"
+                    v-if="pageStore.description"
+                    :dir="pageDir">
+                    {{ pageStore.description }}
+                  </div>
+                </div>
+              </div>
+            </div>
             <!--
               Everything below the banner, held to a measure when the theme asks for the content centered
               (`contentWidth`, see `_page-chrome.scss`). One box rather than a width on each piece: the
@@ -559,6 +589,39 @@
           </w-btn>
         </div>
         <template v-else>
+          <!--
+            Stacked layout, reading: the path lives here instead of in the top bar. Wraps over several
+            lines, and carries the draft badge and the date the bar would have.
+          -->
+          <template v-if="chromeInSidebar">
+            <div class="p-4 flex items-center">
+              <w-icon class="me-2" name="la:sitemap" color="grey" />
+              <div class="text-caption text-grey-7">{{ t('profile.pages.headerPath') }}</div>
+            </div>
+            <div class="page-sidebar-path px-4 pb-4">
+              <w-breadcrumbs
+                :items="breadcrumbs"
+                :active-color="dark.isActive ? `grey-5` : `grey-7`"
+                separator-color="grey">
+                <template #separator><w-icon :name="crumbSeparator" /></template>
+              </w-breadcrumbs>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <w-badge
+                  v-if="pageStore.publishState === `draft`"
+                  class="uppercase"
+                  color="negative"
+                  :label="t(`editor.props.draft`)" />
+                <div class="text-caption text-grey-6">
+                  <i18n-t keypath="common.page.lastModified">
+                    <template #date>
+                      <strong>{{ lastModified }}</strong>
+                    </template>
+                  </i18n-t>
+                </div>
+              </div>
+            </div>
+            <w-separator v-if="showToc || showTags || showRatings || showLastEditedBy" />
+          </template>
           <template v-if="showToc">
             <!-- TOC -->
             <div class="p-4 flex items-center">
@@ -852,6 +915,7 @@ import FooterNav from '@/components/FooterNav.vue'
 import LoadingGeneric from '@/components/LoadingGeneric.vue'
 import PageActionsCol from '@/components/PageActionsCol.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import { pageIconColorClass } from '@/helpers/pageIconColors'
 import PageReaderActions from '@/components/PageReaderActions.vue'
 import PageRedirect from '@/components/PageRedirect.vue'
 import PageTags from '@/components/PageTags.vue'
@@ -1194,14 +1258,42 @@ const showSidebar = computed(() => {
 })
 
 /**
+ * Whether the page's actions sit in the side column rather than in the icon rail and the header row.
+ * Only under the stacked layout, and only while that column is on screen holding them: an editor
+ * session, a redirection, a site with its sidebar off and a blog's front page (whose column is its
+ * own) all keep the column away, and a page whose actions went with it would have none -- so those
+ * cases fall back to the classic placement. A feedback board's front page likewise fills the column
+ * with its own sidebar.
+ */
+const actionsInSidebar = computed(
+  () => isStacked.value && showSidebar.value && !isBlog.value && !isFeedbackBoard.value
+)
+
+/**
+ * Stacked layout, page being read, side column on screen beside the article: the path moves into that
+ * column and the title into the article, so the breadcrumb bar and the header band are not drawn. Any
+ * other case keeps both bars -- the classic layout and the editor, but also a locked page, whose lock
+ * screen stands in for the article and so has nowhere to draw the title, and a phone, where the column
+ * is a panel slid in on request and a trail hidden in it would leave the reader with no way back out.
+ */
+const chromeInSidebar = computed(
+  () => actionsInSidebar.value && !editorStore.isActive && !pageStore.isLocked && !tocIsPanel.value
+)
+
+/**
  * Whether the header's icon is lined up with the start of the body below it rather than with the
  * window's edge: wherever the body is held to a measure in the middle of the article column -- a
  * feedback board, and every page that `isCentered` (an idea, or any page under the theme's Centered
  * content width) -- so that a header starting far to the left of it would read as belonging to
- * something else. Not in the editor, which replaces the column the body is in.
+ * something else. Not in the editor, which replaces the column the body is in, nor where the stacked
+ * layout draws no header band at all (`chromeInSidebar`).
  */
 const alignsHeader = computed(
-  () => (isFeedbackBoard.value || isCentered.value) && !editorStore.isActive && !pageStore.notFound
+  () =>
+    (isFeedbackBoard.value || isCentered.value) &&
+    !editorStore.isActive &&
+    !pageStore.notFound &&
+    !chromeInSidebar.value
 )
 
 /**
@@ -1283,17 +1375,8 @@ watch(tocColumnIsLeft, () => nextTick(measureHeaderBounds))
 
 onBeforeUnmount(() => headerBoundsObserver?.disconnect())
 
-/**
- * Whether the page's actions sit in the side column rather than in the icon rail and the header row.
- * Only under the stacked layout, and only while that column is on screen holding them: an editor
- * session, a redirection, a site with its sidebar off and a blog's front page (whose column is its
- * own) all keep the column away, and a page whose actions went with it would have none -- so those
- * cases fall back to the classic placement. A feedback board's front page likewise fills the column
- * with its own sidebar.
- */
-const actionsInSidebar = computed(
-  () => isStacked.value && showSidebar.value && !isBlog.value && !isFeedbackBoard.value
-)
+/** The page's own direction, for the title block drawn in the article. */
+const pageDir = computed(() => siteStore.localeDir(pageStore.locale))
 /*
   Whether there is a contents SECTION, heading and separator included -- not just whether the page
   asked for one. A page with no headings, or whose depth settings leave nothing to list, would
