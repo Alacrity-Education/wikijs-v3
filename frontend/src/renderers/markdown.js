@@ -440,6 +440,8 @@ export class MarkdownRenderer {
       `title` becomes a header bar above the block; `linesStart` renumbers the gutter; `linesHighlight`
       washes the rows it names. See `codeBlock` for the last two and `parseFenceAttributes` for the
       shape of all three. A diagram fence ignores them -- it is a source for something else to draw.
+      A `wavedrom` fence takes `skin`, `caption` and `align` instead, as the props of the block it is
+      wrapped in.
 
       The line the fence sits on is stamped into the markup rather than onto the token, since the token
       is not what renders it. It is worth the string surgery for the case the preview's scroll sync
@@ -448,6 +450,29 @@ export class MarkdownRenderer {
       The attribute only, without the `line` class the tokens above join, because it would have to go on
       a tag that already carries a class and two `class` attributes on one tag is not markup.
     */
+    /*
+      The tag of the nearest block container the fence at `idx` sits inside, or null. Walked backwards
+      over the flat token array, counting the containers closed on the way: a close seen first belongs
+      to a sibling that ended before the fence, so the next open is that sibling's and is skipped. The
+      first open met with nothing left to skip is the one still open around the fence. Stops there, so
+      a fence in a shallow block costs a few tokens; one at the top level reads back to the start.
+    */
+    const enclosingBlock = (tokens, idx) => {
+      let closed = 0
+      for (let i = idx - 1; i >= 0; i--) {
+        const { type, tag } = tokens[i]
+        if (type === 'mdc_block_close') {
+          closed++
+        } else if (type === 'mdc_block_open') {
+          if (closed === 0) {
+            return tag
+          }
+          closed--
+        }
+      }
+      return null
+    }
+
     this.md.renderer.rules.fence = (tokens, idx) => {
       const token = tokens[idx]
       const info = (token.info ?? '').trim()
@@ -465,7 +490,9 @@ export class MarkdownRenderer {
         unescape
       )
 
-      const html = codeBlock(token.content, lang, attributes)
+      const html = codeBlock(token.content, lang, attributes, {
+        insideBlock: enclosingBlock(tokens, idx)
+      })
       const line = token.map ? ` data-line="${token.map[0] + 1}"` : ''
       const title = (attributes.title ?? '').trim()
 
@@ -482,9 +509,10 @@ export class MarkdownRenderer {
       if (title && html.startsWith('<pre')) {
         return `<div class="codeblock-titled hljs"${line}><div class="codeblock-title">${escape(title)}</div>${html}</div>\n`
       }
-      // -> Every branch of `codeBlock` opens with `<pre`, bar a `diagram` fence's `<figure>`, which has no
-      //    title bar to hold and takes the line stamp the same way
-      return `${html.replace(/^<(pre|figure)/, `<$1${line}`)}\n`
+      // -> Every branch of `codeBlock` opens with `<pre`, bar a `diagram` fence's `<figure>` and a
+      //    `wavedrom` fence's `<block-wavedrom>`, neither of which has a title bar to hold -- a title on
+      //    one is ignored -- and both take the line stamp the same way
+      return `${html.replace(/^<(pre|figure|block-wavedrom)/, `<$1${line}`)}\n`
     }
 
     // --------------------------------

@@ -242,15 +242,44 @@ export const MATH_ENGINES = ['katex', 'mathjax']
 
 /**
  * One fence, as the markup it is drawn as -- rooted at a `<pre>`, whatever it holds, except for a
- * Wiki.js 2 `diagram` fence, which is a `<figure>` holding the picture.
+ * Wiki.js 2 `diagram` fence, which is a `<figure>` holding the picture, and a `wavedrom` fence, which
+ * is a `<block-wavedrom>` holding the source.
  *
  * @param {string} str The code, as the author wrote it.
  * @param {string} lang The first word of the info string.
  * @param {object} attributes The rest of it, parsed -- see `parseFenceAttributes`. Ignored by the
  *                            diagram branch, which is a source for something else to draw and has
  *                            no gutter, no title bar and no lines to mark.
+ * @param {object} [options]
+ * @param {string|null} [options.insideBlock] The tag of the nearest block container the fence sits in,
+ *                            or null at the top level. Only the `wavedrom` branch asks.
  */
-export function codeBlock(str, lang, attributes) {
+export function codeBlock(str, lang, attributes, options = {}) {
+  if (lang === 'wavedrom') {
+    /*
+      A bare ```wavedrom fence draws itself: it is wrapped in the `block-wavedrom` that reads the
+      source out of the `pre`, so an author need not know a block is involved. The three props the block
+      declares are taken from the fence's own attributes -- ```wavedrom skin=dark caption="SPI write",
+      unbraced like every fence option, since `markdown-it-attrs` claims a braced group for itself --
+      and left off when absent, so the block's defaults stay the block's.
+
+      Written inside a `:::block-wavedrom` the author already supplied the block, and a second one in
+      its body would draw the diagram twice, nested; there only the `pre` is returned. Not in
+      `DIAGRAM_LANGUAGES`, which are left bare for an enclosing block to draw.
+    */
+    const pre = `<pre class="codeblock-wavedrom"><code>${escape(str)}</code></pre>`
+    if (options.insideBlock === 'block-wavedrom') {
+      return pre
+    }
+    const props = ['skin', 'caption', 'align']
+      // -> Absent is absent whichever parser asked: markdown's gives `undefined`, asciidoctor's may
+      //    answer `null`, and an empty value says nothing either
+      .filter((key) => attributes?.[key] != null && attributes[key] !== '')
+      .map((key) => ` ${key}="${escape(attributes[key])}"`)
+      .join('')
+    return `<block-wavedrom${props}>${pre}</block-wavedrom>`
+  }
+
   if (lang === 'diagram') {
     /*
       Wiki.js 2 compatibility. v2 stored a draw.io diagram as a ```diagram fence whose body is the base64

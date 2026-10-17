@@ -316,6 +316,16 @@ class WikiConverter extends Html5Converter {
     return WIKI_BLOCK_STYLE.test(node.getStyle() ?? '')
   }
 
+  /** The tag of the nearest `[block-*]` block above `node`, or null -- see `codeBlock`'s `insideBlock`. */
+  enclosingWikiBlock(node) {
+    for (let parent = node.getParent(); parent; parent = parent.getParent?.()) {
+      if (this.isWikiBlock(parent)) {
+        return parent.getStyle()
+      }
+    }
+    return null
+  }
+
   /**
    * An admonition, as the blockquote the content stylesheet draws.
    *
@@ -465,6 +475,10 @@ ${await node.content()}
    *
    * `highlight` accepts AsciiDoc's `1..2` and markdown's `1-2` alike -- the dots are rewritten to a
    * hyphen on the way in, since nobody arriving from a markdown page will write two of them.
+   *
+   * A `wavedrom` listing takes `skin`, `caption` and `align` the same way -- `[source,wavedrom,skin=dark]`
+   * -- as the props of the `<block-wavedrom>` it becomes, and is left as a bare `<pre>` when it sits
+   * inside a `[block-wavedrom]` block, which draws it.
    */
   async convert_listing(node) {
     /*
@@ -475,10 +489,18 @@ ${await node.content()}
       blocks silently lost their line numbers and the last row of a long one was never washed by a
       `highlight` that named it.
     */
-    const html = codeBlock(`${node.getSource()}\n`, node.getAttribute('language') ?? '', {
-      linesstart: node.getAttribute('start'),
-      lineshighlight: (node.getAttribute('highlight') ?? '').replaceAll('..', '-')
-    })
+    const html = codeBlock(
+      `${node.getSource()}\n`,
+      node.getAttribute('language') ?? '',
+      {
+        linesstart: node.getAttribute('start'),
+        lineshighlight: (node.getAttribute('highlight') ?? '').replaceAll('..', '-'),
+        skin: node.getAttribute('skin'),
+        caption: node.getAttribute('caption'),
+        align: node.getAttribute('align')
+      },
+      { insideBlock: this.enclosingWikiBlock(node) }
+    )
     const line = this.lineAttr(node)
     const title = node.hasTitle() ? node.captionedTitle() : ''
     /*
@@ -486,11 +508,12 @@ ${await node.content()}
       shape `markdown.js` builds and for the same reason: a header inside the `<pre>` would slide
       sideways with the code and be indented by the gutter's padding.
     */
-    if (title) {
+    if (title && html.startsWith('<pre')) {
       return `<div class="codeblock-titled hljs"${line}><div class="codeblock-title">${title}</div>${html}</div>`
     }
-    // -> Every branch of `codeBlock` opens with `<pre`
-    return html.replace(/^<pre/, `<pre${line}`)
+    // -> Every branch of `codeBlock` opens with `<pre`, bar a `wavedrom` listing's `<block-wavedrom>`,
+    //    which has no title bar to hold and takes the line stamp the same way
+    return html.replace(/^<(pre|block-wavedrom)/, `<$1${line}`)
   }
 
   /**
