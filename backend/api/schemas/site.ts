@@ -477,6 +477,12 @@ export async function registerSchemas(app: FastifyInstance): Promise<void> {
             type: 'string',
             enum: ['off', 'left', 'right']
           },
+          pageLayout: {
+            type: 'string',
+            enum: ['classic', 'stacked'],
+            description:
+              'Content page layout: classic (Article / Talk / Links tabs) or stacked (comments and links under the article).'
+          },
           showPrintBtn: {
             type: 'boolean'
           },

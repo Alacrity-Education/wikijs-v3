@@ -10,6 +10,7 @@
     the page reads as the largest target, and the rest sit quieter beneath it.
   -->
   <div
+    v-if="variant !== `list`"
     class="page-actions flex flex-col items-stretch order-last"
     :class="editorStore.isActive ? `is-editor` : ``">
     <template v-if="userStore.can(`write:pages`)">
@@ -244,6 +245,190 @@
         : t('common.actions.newPage')
     }}</span>
   </div>
+  <!--
+    The `list` variant: the same actions, in the same order and behind the same gates, as labelled
+    full-width rows for the page's side column. None of the rail's geometry applies -- no fixed width,
+    no square buttons, no editor-orange background -- and the groups are split by horizontal rules.
+    The tooltips go, since the label is on the button.
+  -->
+  <div
+    v-else
+    class="page-actions-list flex flex-col items-stretch"
+    :class="editorStore.isActive ? `is-editor` : ``">
+    <template v-if="userStore.can(`write:pages`)">
+      <!-- -> Disabled, not hidden, for a redirection: see the column variant above -->
+      <w-btn
+        flat
+        dense
+        no-caps
+        icon="la:pen-nib"
+        color="deep-orange-9"
+        :label="t('common.actions.properties')"
+        :disable="isRedirect"
+        @click="togglePageProperties" />
+      <w-btn
+        v-if="flagsStore.experimental"
+        flat
+        dense
+        no-caps
+        icon="la:project-diagram"
+        color="grey-7"
+        :label="t('editor.pageData.title')"
+        @click="togglePageData"
+        disable />
+      <w-btn
+        v-if="editorStore.isActive && !isRedirect"
+        flat
+        dense
+        no-caps
+        icon="mdi:image-sync-outline"
+        :color="hasPendingAssets ? `deep-orange-9` : `grey-7`"
+        label="Pending Asset Uploads">
+        <template #append>
+          <strong v-if="hasPendingAssets" class="page-actions-list-count">{{
+            editorStore.pendingAssets.length
+          }}</strong>
+        </template>
+        <w-menu ref="menuPendingAssetsList" anchor="top left" self="top right" :offset="[10, 0]">
+          <w-card style="width: 450px; max-width: 90vw">
+            <w-card-section class="card-header">
+              <w-icon name="img:/_assets/icons/color-data-pending.svg" left size="sm" />
+              <span>Pending Asset Uploads</span>
+            </w-card-section>
+            <w-card-section v-if="!hasPendingAssets"
+              >There are no assets pending uploads.</w-card-section
+            >
+            <w-list v-else separator>
+              <w-item v-for="item of editorStore.pendingAssets" :key="item.id">
+                <w-item-section side><w-icon name="la:file-image" /></w-item-section>
+                <w-item-section>{{ item.fileName }}</w-item-section>
+                <w-item-section side>
+                  <w-btn
+                    class="acrylic-btn"
+                    color="negative"
+                    round
+                    icon="la:times"
+                    size="xs"
+                    flat
+                    @click="removePendingAsset(item)" />
+                </w-item-section>
+              </w-item>
+            </w-list>
+            <w-card-section class="card-actions">
+              <em class="text-caption"
+                >Assets that are pasted or dropped onto this page will be held here until the page
+                is saved.</em
+              >
+            </w-card-section>
+          </w-card>
+        </w-menu>
+      </w-btn>
+      <w-separator class="my-2" v-if="showHistory || showSource || showPageActions" />
+    </template>
+    <w-btn
+      v-if="showHistory"
+      flat
+      dense
+      no-caps
+      icon="la:history"
+      color="grey-7"
+      :label="t('history.title')"
+      @click="viewPageHistory" />
+    <w-btn
+      v-if="showSource"
+      flat
+      dense
+      no-caps
+      icon="la:code"
+      color="grey-7"
+      :label="t('pageSource.title')"
+      @click="viewPageSource" />
+    <template v-if="showPageActions">
+      <w-separator class="my-2" v-if="showHistory || showSource" />
+      <w-btn
+        flat
+        dense
+        no-caps
+        icon="la:ellipsis-h"
+        color="grey-7"
+        :label="t('common.header.pageActions')">
+        <w-menu
+          class="translucent-menu"
+          anchor="top left"
+          self="top right"
+          auto-close
+          transition-show="jump-left">
+          <w-list padding style="min-width: 225px">
+            <w-item
+              clickable
+              v-if="userStore.can(`write:pages`) && canConvert"
+              @click="convertPage">
+              <w-item-section class="items-center" avatar>
+                <w-icon class="text-deep-orange-9" name="la:atom" size="sm" />
+              </w-item-section>
+              <w-item-section
+                ><w-item-label>{{ t('convertPage.action') }}</w-item-label></w-item-section
+              >
+            </w-item>
+            <w-item clickable v-if="userStore.can(`write:pages`) && hasBody" @click="rerenderPage">
+              <w-item-section class="items-center" avatar>
+                <w-icon class="text-deep-orange-9" name="la:magic" size="sm" />
+              </w-item-section>
+              <w-item-section><w-item-label>Rerender Page</w-item-label></w-item-section>
+            </w-item>
+            <w-item clickable disabled v-if="flagsStore.experimental">
+              <w-item-section class="items-center" avatar>
+                <w-icon class="text-deep-orange-9" name="la:sun" size="sm" />
+              </w-item-section>
+              <w-item-section><w-item-label>View Backlinks</w-item-label></w-item-section>
+            </w-item>
+          </w-list>
+        </w-menu>
+      </w-btn>
+    </template>
+    <!-- -> Hidden outright while a suggestion is being written: see the column variant above -->
+    <template v-if="!(editorStore.isActive && [`create`, `suggest`].includes(editorStore.mode))">
+      <w-separator
+        class="my-2"
+        v-if="
+          userStore.can(`write:pages`) ||
+          userStore.can(`manage:pages`) ||
+          userStore.can(`delete:pages`)
+        " />
+      <w-btn
+        v-if="userStore.can(`write:pages`)"
+        flat
+        dense
+        no-caps
+        icon="la:copy"
+        color="grey-7"
+        :label="t('common.actions.duplicate')"
+        @click="duplicatePage" />
+      <w-btn
+        v-if="userStore.can(`manage:pages`)"
+        flat
+        dense
+        no-caps
+        icon="la:share"
+        color="grey-7"
+        :label="`${t('common.actions.rename')} / ${t('common.actions.move')}`"
+        @click="renamePage" />
+      <w-btn
+        v-if="userStore.can(`delete:pages`)"
+        flat
+        dense
+        no-caps
+        icon="la:trash"
+        color="grey-7"
+        :label="t('common.page.delete')"
+        @click="deletePage" />
+    </template>
+    <span class="page-actions-list-mode text-caption" v-else>{{
+      editorStore.mode === `suggest`
+        ? t('common.actions.suggestedEdit')
+        : t('common.actions.newPage')
+    }}</span>
+  </div>
 </template>
 
 <script setup>
@@ -260,6 +445,21 @@ import { useFlagsStore } from '@/stores/flags'
 import { usePageStore } from '@/stores/page'
 import { useSiteStore } from '@/stores/site'
 import { useUserStore } from '@/stores/user'
+
+// PROPS
+
+defineProps({
+  /**
+   * Where the actions are placed. `column` is the narrow vertical icon rail at the far right of the
+   * page; `list` is the same actions as a labelled list inside the page's side column (the stacked
+   * page layout).
+   */
+  variant: {
+    type: String,
+    default: 'column',
+    validator: (value) => ['column', 'list'].includes(value)
+  }
+})
 
 // STORES
 
@@ -281,6 +481,7 @@ const { t } = useI18n()
 // REFS
 
 const menuPendingAssets = ref(null)
+const menuPendingAssetsList = ref(null)
 
 // DATA
 
@@ -496,7 +697,8 @@ function removePendingAsset(item) {
   URL.revokeObjectURL(item.blobUrl)
   editorStore.pendingAssets = editorStore.pendingAssets.filter((a) => a.id !== item.id)
   if (editorStore.pendingAssets.length < 1) {
-    menuPendingAssets.value.hide()
+    menuPendingAssets.value?.hide()
+    menuPendingAssetsList.value?.hide()
   }
 }
 </script>
@@ -596,6 +798,26 @@ $action-btn-height: 3rem;
   }
   100% {
     transform: translate(0, 0);
+  }
+}
+
+/* The labelled list in the side column: rows as wide as the column, icon and label from the left */
+.page-actions-list {
+  .w-btn {
+    width: 100%;
+    justify-content: flex-start;
+    padding-inline: 1rem;
+  }
+
+  &-count {
+    margin-inline-start: auto;
+    color: $deep-orange-9;
+  }
+
+  &-mode {
+    padding: 0.5rem 1rem;
+    color: $deep-orange-9;
+    font-weight: 500;
   }
 }
 </style>

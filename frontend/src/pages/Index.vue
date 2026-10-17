@@ -55,7 +55,7 @@
         </div>
       </div>
     </div>
-    <page-header v-if="!pageStore.notFound" />
+    <page-header v-if="!pageStore.notFound" :actions-in-sidebar="actionsInSidebar" />
     <!-- -> `min-h-0` so the columns inside can be shorter than their content and scroll -->
     <div
       class="page-container flex min-h-0 flex-nowrap items-stretch"
@@ -85,7 +85,7 @@
           jumped to underneath it.
         -->
         <page-view-tabs
-          v-if="showTalkTab || showLinksTab"
+          v-if="!isStacked && (showTalkTab || showLinksTab)"
           :model-value="activeView"
           :talk="showTalkTab"
           :links="showLinksTab"
@@ -239,7 +239,7 @@
               <page-annotations-layer
                 v-if="state.showAnnotations"
                 :root="pageContents"
-                :active="activeView === `article`"
+                :active="isStacked || activeView === `article`"
                 :interactive="!isAnnotating"
                 :reveal-id="state.revealAnnotationId"
                 :content-revision="state.contentRevision"
@@ -350,6 +350,51 @@
                   </div>
                 </div>
               </div>
+              <!--
+                The stacked layout's discussion and list of links, under the article and its relations
+                instead of behind tabs. Both are inside the measure, so they share the article's width,
+                and inside the scrolling column, so they scroll with it. `id`s so that `#talk` and
+                `#links` scroll to them -- see `onHashChange`. Hidden in print (`_print.scss`).
+
+                The links section is `v-show` rather than `v-if`: it has to stay mounted to fetch, and
+                it is only drawn once the list turns out to have something in it. Its heading carries
+                the count that the tab view's own title bar carries.
+              -->
+              <section
+                v-if="showStackedTalk"
+                id="talk"
+                class="page-stacked-section page-stacked-talk">
+                <div class="page-stacked-heading flex items-center">
+                  <w-icon class="me-2" name="la:comments" color="grey" />
+                  <div class="text-caption text-grey-7">
+                    {{ t('common.comments.commentsTitle') }}
+                  </div>
+                </div>
+                <page-talk
+                  ref="talkView"
+                  :content-root="pageContents"
+                  :content-revision="state.contentRevision"
+                  :embedded="true"
+                  @locate-annotation="locateAnnotation" />
+              </section>
+              <section
+                v-if="showStackedLinks"
+                v-show="state.linksCount > 0"
+                id="links"
+                class="page-stacked-section page-stacked-links">
+                <div class="page-stacked-heading flex items-center">
+                  <w-icon class="me-2" name="la:link" color="grey" />
+                  <div class="text-caption text-grey-7">{{ t('common.links.title') }}</div>
+                  <w-space />
+                  <div class="text-caption text-grey-6">
+                    {{ t('common.links.count', state.linksCount, { count: state.linksCount }) }}
+                  </div>
+                </div>
+                <page-links
+                  ref="linksView"
+                  :embedded="true"
+                  @loaded="(n) => (state.linksCount = n)" />
+              </section>
               <!--
                 Every provider that is not this wiki's own: at the bottom of the article, which is where
                 a site that uses one of them puts its comments and where a reader who uses that provider
@@ -599,10 +644,77 @@
               </router-link>
             </div>
           </template>
+          <template v-if="actionsInSidebar">
+            <!--
+              The stacked layout has no icon rail and no buttons in the header row: both live here, as
+              one labelled list under one heading. Reader buttons first, as they sit in the header in
+              the classic layout, then the page's own actions.
+            -->
+            <w-separator v-if="showToc || showTags || showRatings || showLastEditedBy" />
+            <div class="p-4 flex items-center">
+              <w-icon class="me-2" name="la:cog" color="grey" />
+              <div class="text-caption text-grey-7">{{ t('common.header.pageActions') }}</div>
+            </div>
+            <div class="p-2">
+              <page-reader-actions v-if="!editorStore.isActive" variant="list" />
+              <page-actions-col v-if="!pageStore.notFound" variant="list" />
+            </div>
+            <!-- -> What the Talk view's column offers in the classic layout, there being no such view -->
+            <template v-if="showStackedTalk">
+              <w-separator />
+              <div class="p-4 flex items-center">
+                <w-icon class="me-2" name="la:comments" color="grey" />
+                <div class="text-caption text-grey-7">{{ t('common.comments.commentsTitle') }}</div>
+              </div>
+              <div class="page-talk-actions pt-0">
+                <w-btn
+                  class="acrylic-btn"
+                  flat
+                  no-caps
+                  color="primary"
+                  icon="la:comment-medical"
+                  :label="t('common.comments.newComment')"
+                  :disable="!talkView?.canStartComment"
+                  @click="startNewComment" />
+                <w-btn
+                  class="acrylic-btn"
+                  flat
+                  no-caps
+                  color="primary"
+                  icon="la:highlighter"
+                  :label="t('common.comments.newAnnotation')"
+                  :disable="!talkView?.canStartAnnotation"
+                  @click="startAnnotating" />
+                <w-btn
+                  class="acrylic-btn"
+                  flat
+                  no-caps
+                  :color="dark.isActive ? `indigo-4` : `indigo`"
+                  :icon="state.showAnnotations ? `la:eye-slash` : `la:eye`"
+                  :label="
+                    state.showAnnotations
+                      ? t('common.comments.hideAllAnnotations')
+                      : t('common.comments.viewAllAnnotations')
+                  "
+                  :disable="!state.showAnnotations && !talkView?.annotationCount"
+                  @click="toggleAllAnnotations">
+                  <template #append>
+                    <w-badge
+                      v-if="talkView?.annotationCount > 0"
+                      class="page-talk-actions-count"
+                      rounded
+                      :color="dark.isActive ? `indigo-4` : `indigo`"
+                      :label="talkView.annotationCount" />
+                  </template>
+                </w-btn>
+              </div>
+            </template>
+          </template>
         </template>
       </div>
-      <!-- -> Every action on it acts on a page: there is none here to edit, share, rate or delete -->
-      <page-actions-col v-if="!pageStore.notFound" />
+      <!-- -> Every action on it acts on a page: there is none here to edit, share, rate or delete.
+              The stacked layout has no rail: its actions are in the side column above -->
+      <page-actions-col v-if="!actionsInSidebar && !pageStore.notFound" />
     </div>
     <!--
       What opens that panel, in the bottom-right corner -- the corner `MainLayout` gives to scroll-to-top,
@@ -686,6 +798,7 @@ import FooterNav from '@/components/FooterNav.vue'
 import LoadingGeneric from '@/components/LoadingGeneric.vue'
 import PageActionsCol from '@/components/PageActionsCol.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PageReaderActions from '@/components/PageReaderActions.vue'
 import PageRedirect from '@/components/PageRedirect.vue'
 import PageTags from '@/components/PageTags.vue'
 import PageToc from '@/components/PageToc.vue'
@@ -861,6 +974,8 @@ const state = reactive({
    * annotation components find their passages again on -- see `helpers/glossaryLinker.js`.
    */
   contentRevision: 0,
+  /** How many pages link here, as the stacked layout's Links section last loaded them. */
+  linksCount: 0,
   /** An annotation to scroll to with its note open, once the layer has found it. */
   revealAnnotationId: null
 })
@@ -870,6 +985,8 @@ const glossaryCard = ref(null)
 const pageScroller = ref(null)
 /** The Talk view while it is on screen, for the New Comment button in the column beside it. */
 const talkView = ref(null)
+/** The stacked layout's Links section, which stays mounted so that it can tell whether to show. */
+const linksView = ref(null)
 /** The annotator while it is open, which knows whether leaving would throw anything away. */
 const annotator = ref(null)
 
@@ -951,11 +1068,26 @@ const blogWantsSidebar = computed(() => {
   return sidebar.tags || sidebar.archive
 })
 
+/**
+ * Whether the stacked page layout is on. `undefined`, which is every site that has not chosen, is the
+ * classic layout.
+ */
+const isStacked = computed(() => siteStore.theme.pageLayout === 'stacked')
+
+/*
+  What the page and the theme ask of the column: the page's own switch and the theme's "off" position.
+  In the stacked layout the column is also where the page's actions are -- there is no rail -- so it
+  cannot be switched off without taking them with it. It stays, holding the actions alone, and the
+  four sections these two settings govern (contents, tags, rating, last editor) are what go.
+*/
+const sidebarSectionsOn = computed(
+  () => pageStore.showSidebar && siteStore.theme.tocPosition !== 'off'
+)
+
 const showSidebar = computed(() => {
   return (
-    pageStore.showSidebar &&
+    (sidebarSectionsOn.value || isStacked.value) &&
     siteStore.showSidebar &&
-    siteStore.theme.tocPosition !== 'off' &&
     !editorStore.isActive &&
     // -> Contents, tags and a rating, all of a page that is not there
     !pageStore.notFound &&
@@ -965,6 +1097,15 @@ const showSidebar = computed(() => {
     (!isBlog.value || blogWantsSidebar.value)
   )
 })
+
+/**
+ * Whether the page's actions sit in the side column rather than in the icon rail and the header row.
+ * Only under the stacked layout, and only while that column is on screen holding them: an editor
+ * session, a redirection, a site with its sidebar off and a blog's front page (whose column is its
+ * own) all keep the column away, and a page whose actions went with it would have none -- so those
+ * cases fall back to the classic placement.
+ */
+const actionsInSidebar = computed(() => isStacked.value && showSidebar.value && !isBlog.value)
 /*
   Whether there is a contents SECTION, heading and separator included -- not just whether the page
   asked for one. A page with no headings, or whose depth settings leave nothing to list, would
@@ -972,7 +1113,7 @@ const showSidebar = computed(() => {
   so the two can never disagree about whether a row survives.
 */
 const showToc = computed(() => {
-  if (!pageStore.showToc) {
+  if (!pageStore.showToc || !sidebarSectionsOn.value) {
     return false
   }
   return (
@@ -991,7 +1132,11 @@ const showToc = computed(() => {
   button to reach the mode through.
 */
 const showTags = computed(() => {
-  return pageStore.showTags && (pageStore.tags?.length > 0 || state.tagEditMode)
+  return (
+    sidebarSectionsOn.value &&
+    pageStore.showTags &&
+    (pageStore.tags?.length > 0 || state.tagEditMode)
+  )
 })
 /*
   Both switches have to be on: the site's ratings mode under General -> Features, and the page's own
@@ -999,7 +1144,7 @@ const showTags = computed(() => {
   it is also what says which scale is in force, so that is what is read here.
 */
 const showRatings = computed(() => {
-  return Boolean(pageStore.rating) && pageStore.allowRatings
+  return sidebarSectionsOn.value && Boolean(pageStore.rating) && pageStore.allowRatings
 })
 /*
   A logged in reader who may read the page. Only an account can rate, since one opinion per person
@@ -1027,7 +1172,10 @@ const ratingStarsCaption = computed(() => {
 */
 const showLastEditedBy = computed(() => {
   return (
-    siteStore.features.lastEditedBy && pageStore.showLastEditedBy && Boolean(pageStore.authorId)
+    sidebarSectionsOn.value &&
+    siteStore.features.lastEditedBy &&
+    pageStore.showLastEditedBy &&
+    Boolean(pageStore.authorId)
   )
 })
 const lastEditorInitial = computed(() => {
@@ -1146,6 +1294,10 @@ const showLinksTab = computed(
   since each view is drawn on its own condition and none of them would match.
 */
 const activeView = computed(() => {
+  // -> No views to be on: the article is always drawn, with the discussion and the links under it
+  if (isStacked.value) {
+    return 'article'
+  }
   if (state.view === 'talk' && showTalkTab.value) {
     return 'talk'
   }
@@ -1154,6 +1306,16 @@ const activeView = computed(() => {
   }
   return 'article'
 })
+
+/*
+  The stacked layout's two sections, drawn under the article on the same conditions the tabs have in
+  the classic one -- the tabs' own conditions are all about the page, none about the strip -- and
+  without the tab strip's. `showTalkTab` includes the built-in provider, the page's switch,
+  `read:comments`, an existing, unlocked page that is not being edited, and not a blog front page or a
+  redirection; `showLinksTab` the site and page switches and the same page tests.
+*/
+const showStackedTalk = computed(() => isStacked.value && showTalkTab.value)
+const showStackedLinks = computed(() => isStacked.value && showLinksTab.value)
 
 /** Annotating, which is only ever done over the article. */
 const isAnnotating = computed(() => state.annotating && activeView.value === 'article')
@@ -1281,6 +1443,14 @@ watch(
   over by itself would mean that following a link out of a talk page lands on the next page's talk
   page rather than on the page itself.
 */
+/* -> A count that belongs to the page before, or to a section that was unmounted, would flash up first */
+watch(
+  () => [pageStore.id, showStackedLinks.value],
+  () => {
+    state.linksCount = 0
+  }
+)
+
 watch(
   () => pageStore.id,
   () => {
@@ -1353,9 +1523,11 @@ onBeforeRouteUpdate(guardUnsavedEdits)
   page came with unread entries of that kind.
 */
 watch(
-  () => [pageStore.id, pageStore.unreadNotifications, activeView.value],
+  () => [pageStore.id, pageStore.unreadNotifications, activeView.value, showStackedTalk.value],
   () => {
-    notificationsStore.markSeen({ inDiscussion: activeView.value === 'talk' })
+    notificationsStore.markSeen({
+      inDiscussion: activeView.value === 'talk' || showStackedTalk.value
+    })
   },
   { immediate: true }
 )
@@ -1400,6 +1572,8 @@ function onHashChange() {
   //    heading while the discussion is open has to put the article back or there is nothing to
   //    scroll to: `v-show` leaves the hidden column with no layout, so the anchor is unreachable
   switchView(viewFromHash())
+  // -> In the stacked layout `#talk` and `#links` are sections of the page, not views, and the same
+  //    scroll below takes the reader to them
   /*
     Not awaited, and deliberately: this polls for its target rather than expecting it to be there
     (see `helpers/anchors.js`), so it is already written for a heading that arrives a few frames
@@ -1421,7 +1595,9 @@ function onHashChange() {
  * changing in any of them.
  */
 async function switchView(view) {
-  if (view === state.view) {
+  // -> The stacked layout has no views to move between: what a caller wanted shown is already on the
+  //    page, and what it wanted brought into view it scrolls to itself
+  if (isStacked.value || view === state.view) {
     return
   }
   // -> Annotating is done over the article, so going anywhere else is the end of it -- asked first,
@@ -1864,6 +2040,10 @@ async function confirmStopAnnotating() {
 async function onAnnotationsPosted(commentId) {
   state.annotating = false
   await switchView('talk')
+  // -> The stacked layout's discussion was already mounted, so it has not seen this comment yet
+  if (isStacked.value) {
+    await talkView.value?.load()
+  }
   scrollToAnchorWhenReady(`#comment-${commentId}`)
 }
 

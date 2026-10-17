@@ -674,3 +674,19 @@ $toc-overlay-max: 749.98px;
   -webkit-line-clamp: 3;
   line-clamp: 3;
 }
+
+/*
+  The stacked page layout's discussion and list of links (`pages/Index.vue`), under the article inside
+  the same measure and scrolling with it. Each is told apart from what is above it by a rule and some
+  air; the heading row is the one the side column's sections use. Not drawn in print -- see
+  `_print.scss`.
+*/
+.page-stacked-section {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--page-chrome-rule);
+}
+
+.page-stacked-heading {
+  padding-bottom: 0.75rem;
+}

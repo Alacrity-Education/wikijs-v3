@@ -1,5 +1,5 @@
 <template>
-  <div class="page-talk">
+  <div class="page-talk" :class="{ 'is-embedded': embedded }">
     <div class="py-6 text-center text-body2 text-grey-6" v-if="state.loading && !state.loaded">
       {{ t('common.comments.loading') }}
     </div>
@@ -166,6 +166,19 @@ const props = defineProps({
   contentRoot: {
     type: Object,
     default: null
+  },
+  /**
+   * Sits under a section heading provided by the parent, below the visible article (stacked layout):
+   * drops the centred 900px measure, since the article column already sets the width.
+   */
+  embedded: {
+    type: Boolean,
+    default: false
+  },
+  /** Bumped by the parent whenever the article's DOM is rewritten without `pageStore.render` changing. */
+  contentRevision: {
+    type: Number,
+    default: 0
   }
 })
 
@@ -289,7 +302,7 @@ const threads = computed(() => {
 
 // -> After the DOM has caught up, since what is being searched is the article as drawn
 watch(
-  () => [state.comments, pageStore.render, props.contentRoot],
+  () => [state.comments, pageStore.render, props.contentRoot, props.contentRevision],
   () => findAnnotations(),
   { flush: 'post' }
 )
@@ -676,7 +689,9 @@ defineExpose({
   canStartComment,
   canStartAnnotation,
   annotationCount,
-  startNewComment
+  startNewComment,
+  // -> For the stacked layout, whose discussion stays mounted while a comment is posted from outside it
+  load
 })
 </script>
 
@@ -694,6 +709,11 @@ defineExpose({
   max-width: 900px;
   margin-inline: auto;
   color: #26292e;
+
+  &.is-embedded {
+    max-width: none;
+    margin-inline: 0;
+  }
 
   @at-root .body--dark & {
     color: rgba(255, 255, 255, 0.87);
