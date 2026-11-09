@@ -163,7 +163,9 @@ per thing. A shape with no id and no colour is `white`.
   rule in its colour down its left edge and a lighter background.
 - `panel="right"` / `"left"` puts the panel beside the picture (`minmax(220px, 30%)`), falling below
   it when the block is narrower than about 640 px (a container query); `"below"` (the default) and
-  `"above"` stack; `"none"` draws no panel, list or not.
+  `"above"` stack; `"none"` draws no panel, list or not. Beside, the whole row takes the panel's
+  `#121620`, so a picture shorter or narrower than its legend sits at the top of its column on the
+  same dark rather than over the page's background.
 - The caption, when given, sits under everything, styled as other blocks style theirs.
 - **The figure's width** — the picture and a legend beside it, together — is the `width` prop when
   it is given, otherwise the `width` attribute the renderer wrote on the image from markdown-it-imsize's
@@ -196,6 +198,13 @@ per thing. A shape with no id and no colour is `white`.
   The overlay's viewBox grows by the same amounts — `-padLeft -padTop U H+padTop+padBottom`, with
   `U = W + padLeft + padRight` — and the shapes keep their coordinates. A fence that stays inside the
   picture, the usual case, gets no padding and no background at all.
+- **Annotations have a minimum size on screen.** The picture box's width is watched (a
+  `ResizeObserver` on it, `clientWidth`, which the padding above does not change), giving `k`, the
+  CSS pixels per unit of the space. The unit every size above is a share of is then
+  `max(W × scale, 1.75 × 250 / k)`: a stroke is never drawn thinner than 1.75 px — what a 900-unit
+  space shown 436 px wide draws its default stroke at — and discs, texts, pins, triangles, halos and
+  the padding bounds grow with it, so the figure keeps its proportions. Before the box is measured the
+  unit is `W × scale` alone; `k` is only updated when it moves by more than 0.5 %.
 - **Errors never blank the figure.** A line that does not parse is skipped and reported — line number
   and reason — in a small list under the picture, in the style `block-wavedrom` reports its errors.
   Everything that did parse is drawn.

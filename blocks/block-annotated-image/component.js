@@ -33,6 +33,16 @@ const ID_COLOURS = ['blue', 'red', 'orange', 'yellow', 'green', 'purple', 'cyan'
 /** The dark under every stroke and around every text, so an annotation reads on any background. */
 const HALO = 'rgba(12, 14, 20, 0.85)'
 
+/**
+ * The thinnest a stroke may be drawn on screen, in CSS pixels. Everything else is scaled up with it.
+ *
+ * Taken from the figure that read well: a 900-unit space shown 436 px wide (55 % of the column) draws
+ * its default `W/250` = 3.6-unit stroke at 3.6 × 436 / 900 ≈ 1.75 px. The same picture at 20 % was
+ * 158 px wide, drew that stroke at 0.6 px and shrank the discs and labels to match — unreadable. So a
+ * picture shown smaller than that keeps the annotations at that size, and the picture is what shrinks.
+ */
+const MIN_STROKE_PX = 1.75
+
 /** The id written on a disc. Near-black rather than the halo colour: it sits on the disc's colour. */
 const DISC_INK = '#141414'
 
@@ -571,6 +581,15 @@ export class BlockAnnotatedImageElement extends LitElement {
         grid-template-columns: minmax(220px, 30%) minmax(0, 1fr);
         max-width: none;
       }
+      /*
+        Beside, the row is as tall as the taller of the two, and a picture smaller than its legend
+        would leave the page showing under it: the whole row takes the legend's dark instead, with the
+        picture at the top of its column (.picture is align-self: start).
+      */
+      .layout.is-right,
+      .layout.is-left {
+        background: #121620;
+      }
       .figure.is-center .layout {
         margin-inline: auto;
       }
@@ -800,6 +819,7 @@ export class BlockAnnotatedImageElement extends LitElement {
       // Internal Properties
       _src: { state: true },
       _natural: { state: true },
+      _shown: { state: true },
       _failed: { state: true },
       _active: { state: true }
     }
@@ -820,6 +840,13 @@ export class BlockAnnotatedImageElement extends LitElement {
     /** The picture's natural size, once it has loaded — the overlay is not drawn before. */
     this._natural = null
     this._failed = false
+    /**
+     * How many CSS pixels one unit of the space is shown at, from the picture box's width; null until
+     * the box has been measured. See `_measure`.
+     */
+    this._shown = null
+    this._resize = null
+    this._measured = null
     /** The id being pointed at, from the legend or the picture; null when nothing is. */
     this._active = null
     this._parsed = { space: null, shapes: [], errors: [] }
@@ -862,7 +889,59 @@ export class BlockAnnotatedImageElement extends LitElement {
     this.requestUpdate()
   }
 
+  connectedCallback() {
+    super.connectedCallback()
+    // -> Back in the page after being taken out of it: watch the same box again
+    if (this._measured) {
+      this._watch(this._measured)
+    }
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback()
+    this._resize?.disconnect()
+    this._resize = null
+  }
+
+  /**
+   * Watch the picture box's width, which decides how large the annotations have to be drawn to stay
+   * readable (`MIN_STROKE_PX`).
+   *
+   * `clientWidth` is the box's own width, which the column, the `width` prop and the grid track
+   * decide. The padding this block adds round an annotation past the edge only moves the picture
+   * inside that width, so the measurement never depends on what it is then used to draw — there is
+   * no loop to settle.
+   */
+  _watch(box) {
+    this._measured = box
+    this._resize?.disconnect()
+    this._resize = new ResizeObserver(() => this._measure())
+    this._resize.observe(box)
+  }
+
+  _measure() {
+    const width = this._parsed.space?.width ?? this._natural?.width
+    const box = this._measured?.clientWidth
+    if (!width || !box) {
+      return
+    }
+    const shown = box / width
+    // -> Only a real change redraws; a layout that has settled reports the same width over and over
+    if (!this._shown || Math.abs(shown - this._shown) / this._shown > 0.005) {
+      this._shown = shown
+    }
+  }
+
   updated(changed) {
+    // -> The box exists from the render after the body was read, and again after a failed picture
+    const box = this.renderRoot.querySelector('.picture')
+    if (box && box !== this._measured) {
+      this._watch(box)
+    }
+    // -> The natural size is what the scale is taken against when the fence declares no space
+    if (changed.has('_natural')) {
+      this._measure()
+    }
     // -> A picture already in the cache may have loaded before Lit attached the listener
     if (changed.has('_src') && this._src) {
       const img = this.renderRoot.querySelector('.picture img')
@@ -945,7 +1024,15 @@ export class BlockAnnotatedImageElement extends LitElement {
     const height = space?.height ?? this._natural.height
     const scale = Number.isFinite(this.scale) && this.scale > 0 ? this.scale : 1
     // -> Every default is a share of the width, so a 4000 px photo and an 800 px screenshot match
-    const unit = width * scale
+    /*
+      The unit is the larger of the space as scaled and the unit at which a `unit / 250` stroke is
+      drawn at exactly `MIN_STROKE_PX` on screen — so a picture shown small keeps annotations it
+      can be read with, and `scale` still enlarges a figure that is above that floor already.
+      Before the box has been measured, the first paint, it is the scaled space alone.
+    */
+    const unit = this._shown
+      ? Math.max(width * scale, (MIN_STROKE_PX * 250) / this._shown)
+      : width * scale
     const sizes = {
       stroke: unit / 250,
       discText: unit / 60,
