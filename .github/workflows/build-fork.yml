@@ -1,0 +1,142 @@
+name: Build fork image
+
+# Builds this fork's production image and publishes it to the organisation's registry as
+# ghcr.io/alacrity-education/wikijs-v3. Fork-only: upstream's build.yml stays untouched and keeps
+# triggering on `scarlett` alone, where it would fail for want of requarks' secrets.
+#
+# Tags written per run:
+#   canary                      the latest build of feat/stacked-page-layout (what the server runs)
+#   canary-<run number>         the same image, pinned, for rolling back to a known build
+#   <branch name>               e.g. feat-stacked-page-layout; sha-<short sha>
+#   <tag>                       on a pushed tag alacrity-v*, the tag itself
+#
+# The server pulls with `docker compose -p wikiv3 -f docker-compose.v3.yaml pull wiki3` once the
+# compose file names ghcr.io/alacrity-education/wikijs-v3:canary instead of the locally built image.
+
+on:
+  push:
+    branches:
+      - feat/stacked-page-layout
+    tags:
+      - 'alacrity-v*'
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Platforms to build (linux/amd64 is what the server runs; add linux/arm64 for a Pi, at twice the time)'
+        default: linux/amd64
+        type: string
+
+# A newer push to the same branch supersedes a build still running for the older one
+concurrency:
+  group: build-fork-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/alacrity-education/wikijs-v3
+
+jobs:
+  build:
+    name: Build + publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+
+      # ---------------------------------------------------
+      # VERSION
+      # ---------------------------------------------------
+      # Upstream's 3.0.0-dev becomes 3.0.0-alacrity.<run>.<sha>, which is what Administration → System
+      # reports, so a running instance says which build it is.
+      - name: Set version
+        run: |
+          BASE="$(node -p "require('./backend/package.json').version.replace(/-.*$/, '')")"
+          REL_VERSION="${BASE}-alacrity.${GITHUB_RUN_NUMBER}.${GITHUB_SHA::7}"
+          echo "REL_VERSION=${REL_VERSION}" >> "$GITHUB_ENV"
+          export REL_VERSION
+          for f in backend/package.json frontend/package.json; do
+            node -e "const fs = require('node:fs'); const p = JSON.parse(fs.readFileSync('$f', 'utf8')); p.version = process.env.REL_VERSION; fs.writeFileSync('$f', JSON.stringify(p, null, 2) + '\n')"
+          done
+          echo "Building ${REL_VERSION}"
+
+      # ---------------------------------------------------
+      # FRONTEND + BLOCKS
+      # ---------------------------------------------------
+      # The image copies the built assets and compiled blocks in; it does not build them itself.
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          # npm 12 refuses the twemoji-assets GitHub tarball unless told so; npm 11 (Node 26's own) ignores these
+          NPM_CONFIG_ALLOW_REMOTE: all
+          NPM_CONFIG_ALLOW_GIT: all
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build blocks
+        working-directory: blocks
+        run: |
+          npm ci
+          npm run build
+
+      # ---------------------------------------------------
+      # CONTAINER IMAGE
+      # ---------------------------------------------------
+      - name: Generate Docker meta
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=canary,enable=${{ github.ref == 'refs/heads/feat/stacked-page-layout' }}
+            type=raw,value=canary-${{ github.run_number }},enable=${{ github.ref_type == 'branch' }}
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,format=short
+          labels: |
+            org.opencontainers.image.title=Wiki.js (Alacrity Education fork)
+            org.opencontainers.image.description=Wiki.js 3 with the stacked page layout and the fork's fixes
+            org.opencontainers.image.version=${{ env.REL_VERSION }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: dev/build/Dockerfile
+          push: true
+          platforms: ${{ inputs.platforms || 'linux/amd64' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # The Chrome download and the apt layers are the slow part; a rebuild of the same base reuses them
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### ${REL_VERSION}"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
