@@ -1,20 +1,27 @@
 <template>
   <!--
-    The buttons a reader gets on a page while no editor is open: watch, print, the review tray, and
-    Edit or Suggest edits. `PageHeader` shows them as a row of icons in its action bar; the stacked page
-    layout shows them as a list in the side column. Same buttons, same rules for when each appears --
-    only the shape differs, see `variant`.
+    FORK-ONLY. The buttons a reader gets on a page while no editor is open -- watch, print, the review
+    tray, and Edit or Suggest edits -- as a labelled list for the stacked page layout's side column
+    (`StackedSidebarActions.vue`): one button per line, as wide as the column, its icon and its name
+    against the start edge.
 
-    `display: contents` on the row, so the buttons lay out as direct children of the header's flex row
-    exactly as they did before they lived here.
+    THIS MIRRORS THE READER'S ROW IN `PageHeader.vue`, BY HAND. That file is upstream's and is left
+    untouched so that it merges cleanly, so the same buttons -- behind the same gates, running the same
+    handlers -- are written out again here with only their shape changed: full width, left aligned, the
+    name on the button rather than in a tooltip. Whenever upstream changes that row, bring the change
+    over. Already here, for instance: the disabled Edit with its tooltip on a page locked against edits,
+    and the `ERR_PAGE_EDIT_LOCKED` answer to a suggestion.
+
+    The caller decides WHEN to render this (while an editor is open there is nothing for a reader to
+    do), so it does not look at the editor itself.
   -->
-  <div class="page-reader-actions" :class="`is-${variant}`">
+  <div class="page-reader-actions is-list">
     <!--
       Watching a page is a state of it, so the button IS the state: filled and orange while the
       page is watched, an outline in grey while it is not. Same orange as Edit, because both are
       this reader's own hold on the page rather than decoration.
 
-      `mdi` rather than the `la` this row otherwise uses, because Line Awesome has no filled bell
+      `mdi` rather than the `la` the rest of the list uses, because Line Awesome has no filled bell
       to switch TO: its bell and its bell-solid carry an identical body in Iconify, so that pair
       drew one drawing in two colours. (Names left unquoted on purpose — the icon bundler scans
       this file for quoted references and would keep bundling an icon nothing draws.)
@@ -23,32 +30,27 @@
       and nobody is reading this one — they are passing through it.
     -->
     <w-btn
-      :class="[rowSpacing, { 'is-ringing': state.bellRinging }]"
+      :class="{ 'is-ringing': state.bellRinging }"
       v-if="userStore.authenticated && !isRedirect"
       flat
       dense
       :icon="pageStore.isWatching ? `mdi:bell` : `la:bell`"
       :color="pageStore.isWatching ? `deep-orange-9` : `grey`"
-      :label="isList ? watchLabel : null"
-      :no-caps="isList"
+      :label="watchLabel"
+      no-caps
       :aria-label="watchLabel"
       :aria-pressed="pageStore.isWatching"
-      @click="toggleWatch">
-      <w-tooltip v-if="!isList">{{ watchLabel }}</w-tooltip>
-    </w-btn>
+      @click="toggleWatch" />
     <w-btn
-      :class="rowSpacing"
       v-if="siteStore.theme.showPrintBtn"
       flat
       dense
       icon="la:print"
       color="grey"
-      :label="isList ? t(`common.actions.print`) : null"
-      :no-caps="isList"
+      :label="t(`common.actions.print`)"
+      no-caps
       :aria-label="t(`common.actions.print`)"
-      @click="printPage">
-      <w-tooltip v-if="!isList">{{ t('common.actions.print') }}</w-tooltip>
-    </w-btn>
+      @click="printPage" />
     <!--
       Only for whoever reviews this page: the server answers `canReview` from the approval rules
       and the reviewer's own permissions — with the page itself — so nothing here has to know how
@@ -56,36 +58,28 @@
 
       An empty queue is grey and an empty tray, sitting with Print as one more thing available
       rather than one more thing to do; something waiting fills the tray and turns it orange, the
-      colour this row uses for what belongs to the reader. The count is on the badge either way.
+      colour this list uses for what belongs to the reader. The count is on the badge either way.
 
       A redirection takes no suggestions -- see the button below -- so there is never a queue on
       one to review.
     -->
     <w-btn
-      :class="rowSpacing"
       v-if="pageStore.canReview && !isRedirect"
       flat
       dense
       :color="pendingCount > 0 ? `deep-orange-9` : `grey`"
-      :icon="isList ? inboxIcon : undefined"
-      :label="isList ? t(`inbox.pendingReview`) : null"
-      :no-caps="isList"
+      :icon="inboxIcon"
+      :label="t(`inbox.pendingReview`)"
+      no-caps
       :aria-label="t(`inbox.pendingReview`)">
-      <!--
-        The badge is a sibling of the icon, not a child of it: WIcon renders a bare `<svg>` and no
-        slot, so anything written inside it is dropped — and an HTML badge could not live inside an
-        SVG in any case. It floats against the button, which is the positioned box here.
-      -->
-      <w-icon v-if="!isList" :name="inboxIcon" />
+      <!-- -> The badge floats against the button, which is the positioned box here -->
       <w-badge v-if="pendingCount > 0" color="deep-orange-9" text-color="white" rounded floating>
         <strong>{{ pendingCount }}</strong>
       </w-badge>
-      <w-tooltip v-if="!isList">{{ t('inbox.pendingReview') }}</w-tooltip>
       <!--
-        Down from the button's far edge, like every other menu hanging off this row: the panel is
-        wider than the button and the button is near the end of the row, so aligning the edges on
-        that side is what keeps it on screen -- the right ones, or the left ones on a right-to-left
-        interface, where the actions are at the left of the window.
+        Down from the button's far edge, as the header's menus hang: the panel is wider than the
+        button, so aligning the edges on that side is what keeps it on screen -- the right ones, or
+        the left ones on a right-to-left interface.
       -->
       <w-menu
         class="translucent-menu"
@@ -120,21 +114,12 @@
       </w-menu>
     </w-btn>
     <!--
-      Not `v-else-if` on the block below: changes made from the page properties panel put the header
-      into the pending state without an editor behind it, and hiding Edit there left no way back into
-      the content at all.
-    -->
-    <!--
       Disabled rather than hidden on a page locked against edits, with the reason in its tooltip: a
       button that vanishes says nothing, and the reader may well hold the permission it used to need.
       The span is what the tooltip hangs on, since a disabled button takes no hover of its own.
     -->
     <template v-if="userStore.can(`write:pages`)">
-      <span
-        v-if="pageStore.isEditLocked"
-        class="inline-flex"
-        :class="rowSpacing"
-        data-tooltip-anchor>
+      <span v-if="pageStore.isEditLocked" class="inline-flex" data-tooltip-anchor>
         <w-btn
           class="acrylic-btn"
           flat
@@ -149,7 +134,6 @@
       <w-btn
         v-else
         class="acrylic-btn"
-        :class="rowSpacing"
         flat
         icon="la:edit"
         color="deep-orange-9"
@@ -170,11 +154,7 @@
       the one place that asks for it.
     -->
     <template v-else-if="pageStore.canSuggestEdits && !isRedirect">
-      <span
-        v-if="pageStore.isEditLocked"
-        class="inline-flex"
-        :class="rowSpacing"
-        data-tooltip-anchor>
+      <span v-if="pageStore.isEditLocked" class="inline-flex" data-tooltip-anchor>
         <w-btn
           class="acrylic-btn"
           flat
@@ -189,7 +169,6 @@
       <w-btn
         v-else
         class="acrylic-btn"
-        :class="rowSpacing"
         flat
         icon="la:edit"
         color="deep-orange-9"
@@ -220,22 +199,6 @@ import { useUserStore } from '@/stores/user'
  */
 const BELL_RING_MS = 700
 
-const props = defineProps({
-  /**
-   * `row`: horizontal icon buttons (tooltips carry the names), for the page header's action bar.
-   * `list`: a vertical list for a side column -- each action a full-width, left-aligned flat button
-   * with its icon and a visible label.
-   *
-   * The caller decides WHEN to render this (while an editor is open there is nothing for a reader to
-   * do), so it does not look at the editor itself.
-   */
-  variant: {
-    type: String,
-    default: 'row',
-    validator: (value) => ['row', 'list'].includes(value)
-  }
-})
-
 // STORES
 
 const commonStore = useCommonStore()
@@ -253,11 +216,6 @@ const { t } = useI18n()
 
 // COMPUTED
 
-const isList = computed(() => props.variant === 'list')
-
-/** The gap between icons in the row; the list stacks its buttons and spaces them with `gap`. */
-const rowSpacing = computed(() => (isList.value ? '' : 'ms-4'))
-
 const watchLabel = computed(() =>
   pageStore.isWatching ? t('common.page.unwatch') : t('common.page.watch')
 )
@@ -274,9 +232,9 @@ const suggestLabel = computed(() =>
 )
 
 /**
- * The physical side the row ends on, which is the side the action buttons are near and so the side a
- * menu hanging off one of them aligns to. `WMenu` places in physical terms, being positioned against
- * the window rather than laid out in the row.
+ * The physical side the column's buttons end on, which is the side a menu hanging off one of them
+ * aligns to. `WMenu` places in physical terms, being positioned against the window rather than laid
+ * out in the column.
  */
 const endSide = computed(() =>
   siteStore.localeDir(commonStore.locale) === 'rtl' ? 'left' : 'right'
@@ -380,14 +338,10 @@ async function toggleWatch() {
 </script>
 
 <style scoped lang="scss">
-.page-reader-actions.is-row {
-  display: contents;
-}
-
 /*
   The side-column shape: one button per line, each as wide as the column with its icon and label
-  against the start edge. Orange and grey keep the meaning they have in the row -- orange for what is
-  this reader's own hold on the page, grey for what is merely available.
+  against the start edge. Orange and grey keep the meaning they have in the header's row -- orange for
+  what is this reader's own hold on the page, grey for what is merely available.
 
   Reaches `WBtn`'s root through the scoped attribute a child's root element inherits.
 */

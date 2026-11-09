@@ -1,5 +1,5 @@
 <template>
-  <div class="page-talk" :class="{ 'is-inline': inline, 'is-embedded': embedded }">
+  <div class="page-talk" :class="{ 'is-inline': inline }">
     <div class="page-talk-inline-title" v-if="inline">
       <w-icon name="la:comments" />
       <span class="pl-2">{{ t('common.feedback.discussion') }}</span>
@@ -193,14 +193,10 @@ const props = defineProps({
     default: false
   },
   /**
-   * Sits under a section heading provided by the parent, below the visible article (stacked layout):
-   * drops the centred 900px measure, since the article column already sets the width.
+   * Bumped by the parent whenever the article's DOM is rewritten without `pageStore.render` changing,
+   * which is when the annotations have to be looked for again -- the stacked layout's section, which
+   * stays mounted beside the article (fork: `components/stacked/StackedTalkSection.vue`).
    */
-  embedded: {
-    type: Boolean,
-    default: false
-  },
-  /** Bumped by the parent whenever the article's DOM is rewritten without `pageStore.render` changing. */
   contentRevision: {
     type: Number,
     default: 0
@@ -747,8 +743,7 @@ defineExpose({
   canStartAnnotation,
   annotationCount,
   startNewComment,
-  // -> For a feedback idea's status change, which may have posted a comment from outside this view,
-  //    and for the stacked layout, whose discussion stays mounted while one is posted from outside it
+  // -> For a feedback idea's status change, which may have posted a comment from outside this view
   reload: load
 })
 </script>
@@ -767,11 +762,6 @@ defineExpose({
   max-width: 900px;
   margin-inline: auto;
   color: #26292e;
-
-  &.is-embedded {
-    max-width: none;
-    margin-inline: 0;
-  }
 
   @at-root .body--dark & {
     color: rgba(255, 255, 255, 0.87);

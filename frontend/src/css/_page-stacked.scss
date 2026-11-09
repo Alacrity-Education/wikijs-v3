@@ -1,0 +1,64 @@
+/*
+  FORK-ONLY. The stacked page layout (Admin → Theme → Page Layout; `composables/stackedLayout.js`):
+  what it adds to the page chrome, kept apart from `_page-chrome.scss` so that upstream's sheet merges
+  untouched. Loaded right after it (`app.scss`), so that where a rule here ties with one there on
+  specificity, this wins.
+*/
+
+/* -> Stacked reading: no bars above the columns, so no hairline of daylight to separate them from */
+.page-container.page-container--flush {
+  border-top: 0;
+}
+
+/*
+  The discussion and the list of links under the article (`components/stacked/StackedTalkSection.vue`
+  and `StackedLinksSection.vue`), inside the same measure and scrolling with it. Each is told apart from
+  what is above it by a rule and some air; the heading row is the one the side column's sections use.
+*/
+.page-stacked-section {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--page-chrome-rule);
+}
+
+.page-stacked-heading {
+  padding-bottom: 0.75rem;
+}
+
+/* -> Links onward and a discussion, which paper can do nothing with: hidden in print, as `_print.scss`
+      hides the tabs that hold them in the classic layout */
+@media print {
+  .page-stacked-section {
+    display: none !important;
+  }
+}
+
+/*
+  The Talk view and the Links view as sections (`is-embedded`, set by the sections that wrap them): the
+  Talk view drops the centred 900px measure it holds its threads to, since the article column already
+  sets the width; the Links view's grid drops the padding that stood it off from its own title bar,
+  which is left out when embedded -- the section's heading says what is below, count included.
+*/
+.page-talk.is-embedded {
+  max-width: none;
+  margin-inline: 0;
+}
+
+.page-links.is-embedded .page-links-grid {
+  padding-top: 0;
+}
+
+/*
+  The page's title in the article, in place of the header band (`StackedInlineTitle.vue`). No band, no
+  gradient: the margin below keeps the first heading of the article off it.
+*/
+.page-inline-header {
+  margin-bottom: 1.5rem;
+  overflow-wrap: anywhere;
+}
+
+/* The path in the side column (`StackedSidebarPath.vue`): long crumbs break rather than push it wider */
+.page-sidebar-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

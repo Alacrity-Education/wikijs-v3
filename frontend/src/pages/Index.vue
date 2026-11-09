@@ -55,14 +55,12 @@
         </div>
       </div>
     </div>
-    <!--
-      Stacked layout, reading: the title is drawn at the top of the article instead (`page-inline-header`)
-      and the path in the side column, so neither bar is rendered. The editor keeps the band, since the
-      title and description fields and the save / close buttons live in it.
-    -->
-    <page-header
+    <!-- -> Stacked layout, reading: the title is drawn in the article (`StackedInlineTitle`) and the path in
+            the side column, so neither bar is; where the band stays while the actions are in the column -- a
+            phone, a locked page -- it is drawn without its row (`StackedPageHeader`) -->
+    <component
+      :is="actionsInSidebar ? StackedPageHeader : PageHeader"
       v-if="!pageStore.notFound && !chromeInSidebar"
-      :actions-in-sidebar="actionsInSidebar"
       :class="{ 'is-aligned': headerBounds !== null }"
       :style="
         headerBounds !== null
@@ -206,28 +204,8 @@
               itself and what follows.
             -->
             <site-banner v-if="activeView === `article`" />
-            <!--
-              The page's title, in the article so it scrolls with it. Stacked layout while reading only:
-              the header band is not drawn there, and the editor keeps the band.
-            -->
-            <div class="page-measure" v-if="chromeInSidebar">
-              <div class="page-inline-header flex items-start gap-3" :lang="pageStore.locale">
-                <w-icon
-                  class="flex-none rounded"
-                  :class="pageIconColorClass(pageStore.iconColor)"
-                  :name="pageStore.icon"
-                  size="40px" />
-                <div class="min-w-0 flex-1">
-                  <div class="text-h4 page-header-title" :dir="pageDir">{{ pageStore.title }}</div>
-                  <div
-                    class="text-subtitle2 page-header-subtitle"
-                    v-if="pageStore.description"
-                    :dir="pageDir">
-                    {{ pageStore.description }}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <!-- -> Stacked layout, reading: the title here, in the article, so it scrolls with it -->
+            <stacked-inline-title v-if="chromeInSidebar" />
             <!--
               Everything below the banner, held to a measure when the theme asks for the content centered
               (`contentWidth`, see `_page-chrome.scss`). One box rather than a width on each piece: the
@@ -414,65 +392,29 @@
                 </div>
               </div>
               <!--
-                The stacked layout's discussion and list of links, under the article and its relations
-                instead of behind tabs. Both are inside the measure, so they share the article's width,
-                and inside the scrolling column, so they scroll with it. `id`s so that `#talk` and
-                `#links` scroll to them -- see `onHashChange`. Hidden in print (`_print.scss`).
-
-                The links section is `v-show` rather than `v-if`: it has to stay mounted to fetch, and
-                it is only drawn once the list turns out to have something in it. Its heading carries
-                the count that the tab view's own title bar carries.
+                Every provider that is not this wiki's own: at the bottom of the article, which is where
+                a site that uses one of them puts its comments and where a reader who uses that provider
+                elsewhere expects to find them.
               -->
-              <section
-                v-if="showStackedTalk"
-                id="talk"
-                class="page-stacked-section page-stacked-talk">
-                <div class="page-stacked-heading flex items-center">
-                  <w-icon class="me-2" name="la:comments" color="grey" />
-                  <div class="text-caption text-grey-7">
-                    {{ t('common.comments.commentsTitle') }}
-                  </div>
-                </div>
-                <page-talk
-                  ref="talkView"
-                  :content-root="pageContents"
-                  :content-revision="state.contentRevision"
-                  :embedded="true"
-                  @locate-annotation="locateAnnotation" />
-              </section>
               <!--
                 An idea's discussion, under it rather than on a Talk tab: on a feedback board the
                 comments are the conversation about the idea, read as the rest of it. See
-                `showInlineTalk`. Ahead of the stacked layout's links, as its own discussion is.
+                `showInlineTalk`.
               -->
               <page-talk
                 v-if="showInlineTalk"
                 ref="inlineTalk"
                 inline
                 :content-root="pageContents" />
-              <section
-                v-if="showStackedLinks"
-                v-show="state.linksCount > 0"
-                id="links"
-                class="page-stacked-section page-stacked-links">
-                <div class="page-stacked-heading flex items-center">
-                  <w-icon class="me-2" name="la:link" color="grey" />
-                  <div class="text-caption text-grey-7">{{ t('common.links.title') }}</div>
-                  <w-space />
-                  <div class="text-caption text-grey-6">
-                    {{ t('common.links.count', state.linksCount, { count: state.linksCount }) }}
-                  </div>
-                </div>
-                <page-links
-                  ref="linksView"
-                  :embedded="true"
-                  @loaded="(n) => (state.linksCount = n)" />
-              </section>
-              <!--
-                Every provider that is not this wiki's own: at the bottom of the article, which is where
-                a site that uses one of them puts its comments and where a reader who uses that provider
-                elsewhere expects to find them.
-              -->
+              <!-- -> Stacked layout: the discussion and the list of what links here, under the article in
+                      place of the tabs. Never beside an idea's discussion, which stands in for a Talk tab too -->
+              <stacked-talk-section
+                v-if="showStackedTalk"
+                ref="talkView"
+                :content-root="pageContents"
+                :content-revision="state.contentRevision"
+                @locate-annotation="locateAnnotation" />
+              <stacked-links-section v-if="showStackedLinks" />
               <page-comments-embed v-if="showCommentsEmbed" />
             </div>
           </div>
@@ -589,39 +531,13 @@
           </w-btn>
         </div>
         <template v-else>
-          <!--
-            Stacked layout, reading: the path lives here instead of in the top bar. Wraps over several
-            lines, and carries the draft badge and the date the bar would have.
-          -->
-          <template v-if="chromeInSidebar">
-            <div class="p-4 flex items-center">
-              <w-icon class="me-2" name="la:sitemap" color="grey" />
-              <div class="text-caption text-grey-7">{{ t('profile.pages.headerPath') }}</div>
-            </div>
-            <div class="page-sidebar-path px-4 pb-4">
-              <w-breadcrumbs
-                :items="breadcrumbs"
-                :active-color="dark.isActive ? `grey-5` : `grey-7`"
-                separator-color="grey">
-                <template #separator><w-icon :name="crumbSeparator" /></template>
-              </w-breadcrumbs>
-              <div class="mt-2 flex flex-wrap items-center gap-2">
-                <w-badge
-                  v-if="pageStore.publishState === `draft`"
-                  class="uppercase"
-                  color="negative"
-                  :label="t(`editor.props.draft`)" />
-                <div class="text-caption text-grey-6">
-                  <i18n-t keypath="common.page.lastModified">
-                    <template #date>
-                      <strong>{{ lastModified }}</strong>
-                    </template>
-                  </i18n-t>
-                </div>
-              </div>
-            </div>
-            <w-separator v-if="showToc || showTags || showRatings || showLastEditedBy" />
-          </template>
+          <!-- -> Stacked layout, reading: the path, in place of the top bar -->
+          <stacked-sidebar-path
+            v-if="chromeInSidebar"
+            :items="breadcrumbs"
+            :separator="crumbSeparator"
+            :last-modified="lastModified"
+            :has-sections="showToc || showTags || showRatings || showLastEditedBy" />
           <template v-if="showToc">
             <!-- TOC -->
             <div class="p-4 flex items-center">
@@ -761,72 +677,16 @@
               </router-link>
             </div>
           </template>
-          <template v-if="actionsInSidebar">
-            <!--
-              The stacked layout has no icon rail and no buttons in the header row: both live here, as
-              one labelled list under one heading. Reader buttons first, as they sit in the header in
-              the classic layout, then the page's own actions.
-            -->
-            <w-separator v-if="showToc || showTags || showRatings || showLastEditedBy" />
-            <div class="p-4 flex items-center">
-              <w-icon class="me-2" name="la:cog" color="grey" />
-              <div class="text-caption text-grey-7">{{ t('common.header.pageActions') }}</div>
-            </div>
-            <div class="p-2">
-              <page-reader-actions v-if="!editorStore.isActive" variant="list" />
-              <page-actions-col v-if="!pageStore.notFound" variant="list" />
-            </div>
-            <!-- -> What the Talk view's column offers in the classic layout, there being no such view -->
-            <template v-if="showStackedTalk">
-              <w-separator />
-              <div class="p-4 flex items-center">
-                <w-icon class="me-2" name="la:comments" color="grey" />
-                <div class="text-caption text-grey-7">{{ t('common.comments.commentsTitle') }}</div>
-              </div>
-              <div class="page-talk-actions pt-0">
-                <w-btn
-                  class="acrylic-btn"
-                  flat
-                  no-caps
-                  color="primary"
-                  icon="la:comment-medical"
-                  :label="t('common.comments.newComment')"
-                  :disable="!talkView?.canStartComment"
-                  @click="startNewComment" />
-                <w-btn
-                  class="acrylic-btn"
-                  flat
-                  no-caps
-                  color="primary"
-                  icon="la:highlighter"
-                  :label="t('common.comments.newAnnotation')"
-                  :disable="!talkView?.canStartAnnotation"
-                  @click="startAnnotating" />
-                <w-btn
-                  class="acrylic-btn"
-                  flat
-                  no-caps
-                  :color="dark.isActive ? `indigo-4` : `indigo`"
-                  :icon="state.showAnnotations ? `la:eye-slash` : `la:eye`"
-                  :label="
-                    state.showAnnotations
-                      ? t('common.comments.hideAllAnnotations')
-                      : t('common.comments.viewAllAnnotations')
-                  "
-                  :disable="!state.showAnnotations && !talkView?.annotationCount"
-                  @click="toggleAllAnnotations">
-                  <template #append>
-                    <w-badge
-                      v-if="talkView?.annotationCount > 0"
-                      class="page-talk-actions-count"
-                      rounded
-                      :color="dark.isActive ? `indigo-4` : `indigo`"
-                      :label="talkView.annotationCount" />
-                  </template>
-                </w-btn>
-              </div>
-            </template>
-          </template>
+          <!-- -> Stacked layout: the page's actions, in place of the rail and the header's row -->
+          <stacked-sidebar-actions
+            v-if="actionsInSidebar"
+            :has-sections="showToc || showTags || showRatings || showLastEditedBy"
+            :talk="showStackedTalk"
+            :talk-view="talkView"
+            :show-annotations="state.showAnnotations"
+            @new-comment="startNewComment"
+            @new-annotation="startAnnotating"
+            @toggle-annotations="toggleAllAnnotations" />
         </template>
       </div>
       <!-- -> Every action on it acts on a page: there is none here to edit, share, rate or delete.
@@ -883,6 +743,7 @@ import { notify } from '@/composables/notify'
 import { withViewTransition } from '@/composables/viewTransition'
 import { loading } from '@/composables/loading'
 import { pageProgress } from '@/composables/pageProgress'
+import { useStackedLayout } from '@/composables/stackedLayout'
 import { scrollToAnchor, scrollToAnchorWhenReady } from '@/helpers/anchors'
 import { clearHighlights, indexText, locateAnchor } from '@/helpers/annotations'
 import {
@@ -915,8 +776,6 @@ import FooterNav from '@/components/FooterNav.vue'
 import LoadingGeneric from '@/components/LoadingGeneric.vue'
 import PageActionsCol from '@/components/PageActionsCol.vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { pageIconColorClass } from '@/helpers/pageIconColors'
-import PageReaderActions from '@/components/PageReaderActions.vue'
 import PageRedirect from '@/components/PageRedirect.vue'
 import PageTags from '@/components/PageTags.vue'
 import PageToc from '@/components/PageToc.vue'
@@ -924,6 +783,13 @@ import PageUnlockDialog from '@/components/PageUnlockDialog.vue'
 import PageViewTabs from '@/components/PageViewTabs.vue'
 import SideDialog from '@/components/SideDialog.vue'
 import SiteBanner from '@/components/SiteBanner.vue'
+/* -> Fork: the stacked page layout's pieces, kept out of upstream's files; see `composables/stackedLayout.js` */
+import StackedInlineTitle from '@/components/stacked/StackedInlineTitle.vue'
+import StackedLinksSection from '@/components/stacked/StackedLinksSection.vue'
+import StackedPageHeader from '@/components/stacked/StackedPageHeader.vue'
+import StackedSidebarActions from '@/components/stacked/StackedSidebarActions.vue'
+import StackedSidebarPath from '@/components/stacked/StackedSidebarPath.vue'
+import StackedTalkSection from '@/components/stacked/StackedTalkSection.vue'
 
 /*
   Neither of these is wanted by a page view that has no comments, and the talk view brings a markdown
@@ -1111,8 +977,6 @@ const state = reactive({
    * annotation components find their passages again on -- see `helpers/glossaryLinker.js`.
    */
   contentRevision: 0,
-  /** How many pages link here, as the stacked layout's Links section last loaded them. */
-  linksCount: 0,
   /** An annotation to scroll to with its note open, once the layer has found it. */
   revealAnnotationId: null
 })
@@ -1124,8 +988,6 @@ const pageScroller = ref(null)
 const talkView = ref(null)
 /** An idea's discussion, under its article, which a status change may have just posted into. */
 const inlineTalk = ref(null)
-/** The stacked layout's Links section, which stays mounted so that it can tell whether to show. */
-const linksView = ref(null)
 /** The annotator while it is open, which knows whether leaving would throw anything away. */
 const annotator = ref(null)
 
@@ -1227,24 +1089,31 @@ const blogWantsSidebar = computed(() => {
   return sidebar.tags || sidebar.archive
 })
 
-/**
- * Whether the stacked page layout is on. `undefined`, which is every site that has not chosen, is the
- * classic layout.
- */
-const isStacked = computed(() => siteStore.theme.pageLayout === 'stacked')
-
 /*
-  What the page and the theme ask of the column: the page's own switch and the theme's "off" position.
-  In the stacked layout the column is also where the page's actions are -- there is no rail -- so it
-  cannot be switched off without taking them with it. It stays, holding the actions alone, and the
-  four sections these two settings govern (contents, tags, rating, last editor) are what go.
+  Fork: the stacked page layout's switches, out of this file (`composables/stackedLayout.js`). The
+  column, the discussion and the links list are handed over as getters: they are declared below -- the
+  column reads `isStacked` back -- and none of them is read before the `alignsHeader` watch runs, by
+  which point all three exist.
 */
-const sidebarSectionsOn = computed(
-  () => pageStore.showSidebar && siteStore.theme.tocPosition !== 'off'
-)
+const {
+  isStacked,
+  sidebarSectionsOn,
+  actionsInSidebar,
+  chromeInSidebar,
+  showStackedTalk,
+  showStackedLinks
+} = useStackedLayout({
+  showSidebar: () => showSidebar.value,
+  isBlog,
+  isFeedbackBoard,
+  tocIsPanel,
+  showTalkTab: () => showTalkTab.value,
+  showLinksTab: () => showLinksTab.value
+})
 
 const showSidebar = computed(() => {
   return (
+    // -> Or the stacked layout, whose column holds the page's actions and so stays: `sidebarSectionsOn`
     (sidebarSectionsOn.value || isStacked.value) &&
     siteStore.showSidebar &&
     !editorStore.isActive &&
@@ -1256,29 +1125,6 @@ const showSidebar = computed(() => {
     (!isBlog.value || blogWantsSidebar.value)
   )
 })
-
-/**
- * Whether the page's actions sit in the side column rather than in the icon rail and the header row.
- * Only under the stacked layout, and only while that column is on screen holding them: an editor
- * session, a redirection, a site with its sidebar off and a blog's front page (whose column is its
- * own) all keep the column away, and a page whose actions went with it would have none -- so those
- * cases fall back to the classic placement. A feedback board's front page likewise fills the column
- * with its own sidebar.
- */
-const actionsInSidebar = computed(
-  () => isStacked.value && showSidebar.value && !isBlog.value && !isFeedbackBoard.value
-)
-
-/**
- * Stacked layout, page being read, side column on screen beside the article: the path moves into that
- * column and the title into the article, so the breadcrumb bar and the header band are not drawn. Any
- * other case keeps both bars -- the classic layout and the editor, but also a locked page, whose lock
- * screen stands in for the article and so has nowhere to draw the title, and a phone, where the column
- * is a panel slid in on request and a trail hidden in it would leave the reader with no way back out.
- */
-const chromeInSidebar = computed(
-  () => actionsInSidebar.value && !editorStore.isActive && !pageStore.isLocked && !tocIsPanel.value
-)
 
 /**
  * Whether the header's icon is lined up with the start of the body below it rather than with the
@@ -1375,8 +1221,6 @@ watch(tocColumnIsLeft, () => nextTick(measureHeaderBounds))
 
 onBeforeUnmount(() => headerBoundsObserver?.disconnect())
 
-/** The page's own direction, for the title block drawn in the article. */
-const pageDir = computed(() => siteStore.localeDir(pageStore.locale))
 /*
   Whether there is a contents SECTION, heading and separator included -- not just whether the page
   asked for one. A page with no headings, or whose depth settings leave nothing to list, would
@@ -1403,11 +1247,11 @@ const showToc = computed(() => {
   button to reach the mode through.
 */
 const showTags = computed(() => {
-  return (
-    sidebarSectionsOn.value &&
-    pageStore.showTags &&
-    (pageStore.tags?.length > 0 || state.tagEditMode)
-  )
+  // -> Nor while the stacked layout keeps the column for its actions alone: see `sidebarSectionsOn`
+  if (!sidebarSectionsOn.value) {
+    return false
+  }
+  return pageStore.showTags && (pageStore.tags?.length > 0 || state.tagEditMode)
 })
 /*
   Both switches have to be on: the site's ratings mode under General -> Features, and the page's own
@@ -1415,10 +1259,11 @@ const showTags = computed(() => {
   it is also what says which scale is in force, so that is what is read here.
 */
 const showRatings = computed(() => {
+  if (!sidebarSectionsOn.value) {
+    return false
+  }
   // -> Not on an idea, whose vote is in its head -- and a thumb down beside an upvote would contradict it
-  return (
-    sidebarSectionsOn.value && Boolean(pageStore.rating) && pageStore.allowRatings && !isIdea.value
-  )
+  return Boolean(pageStore.rating) && pageStore.allowRatings && !isIdea.value
 })
 /*
   A logged in reader who may read the page. Only an account can rate, since one opinion per person
@@ -1445,11 +1290,11 @@ const ratingStarsCaption = computed(() => {
   it -- so it is the last editor rather than whoever created the page.
 */
 const showLastEditedBy = computed(() => {
+  if (!sidebarSectionsOn.value) {
+    return false
+  }
   return (
-    sidebarSectionsOn.value &&
-    siteStore.features.lastEditedBy &&
-    pageStore.showLastEditedBy &&
-    Boolean(pageStore.authorId)
+    siteStore.features.lastEditedBy && pageStore.showLastEditedBy && Boolean(pageStore.authorId)
   )
 })
 const lastEditorInitial = computed(() => {
@@ -1603,16 +1448,6 @@ const showInlineTalk = computed(
     userStore.pagePermissions.includes('read:comments')
 )
 
-/*
-  The stacked layout's two sections, drawn under the article on the same conditions the tabs have in
-  the classic one -- the tabs' own conditions are all about the page, none about the strip -- and
-  without the tab strip's. `showTalkTab` includes the built-in provider, the page's switch,
-  `read:comments`, an existing, unlocked page that is not being edited, and not a blog front page or a
-  redirection; `showLinksTab` the site and page switches and the same page tests.
-*/
-const showStackedTalk = computed(() => isStacked.value && showTalkTab.value)
-const showStackedLinks = computed(() => isStacked.value && showLinksTab.value)
-
 /** Annotating, which is only ever done over the article. */
 const isAnnotating = computed(() => state.annotating && activeView.value === 'article')
 
@@ -1737,14 +1572,6 @@ watch(
   over by itself would mean that following a link out of a talk page lands on the next page's talk
   page rather than on the page itself.
 */
-/* -> A count that belongs to the page before, or to a section that was unmounted, would flash up first */
-watch(
-  () => [pageStore.id, showStackedLinks.value],
-  () => {
-    state.linksCount = 0
-  }
-)
-
 watch(
   () => pageStore.id,
   () => {

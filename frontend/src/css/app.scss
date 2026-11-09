@@ -1,6 +1,7 @@
 @use 'base';
 @use 'animation';
 @use 'page-chrome';
+@use 'page-stacked'; /* -> Fork: what the stacked page layout adds to that chrome, over it */
 @use 'page-contents';
 /* -> After it, and reads as a layer on top: every selector in it is `.page-contents.is-asciidoc` */
 @use 'page-contents-asciidoc';
