@@ -184,6 +184,18 @@ per thing. A shape with no id and no colour is `white`.
   picture box, so nothing about the figure depends on the stylesheet of the page around it. The overlay is drawn only once the
   image has loaded and its natural size is known; an image that fails to load shows its `alt` in a
   dashed box and the parse errors, if any.
+- **An annotation past the picture's edge is never clipped.** Once the space is known, the extent of
+  everything drawn is worked out in space units: stroked shapes' points ± half of the two passes
+  together (`(stroke + dark under-stroke) / 2`; a circle's centre ± its radius plus that; an arrowhead's
+  corners ± half the halo), a `tri` ± its size, a disc its anchor ± (radius + stroke), and a `text` or
+  `label` estimated at 0.6 × size per character across, placed by its anchor (a label starts past its
+  disc), and ± 0.6 × size about the line it is centred on — plus one stroke of breathing room. Whatever
+  reaches past an edge becomes padding on that side of the picture box, in the legend's `#121620`, as
+  a percentage of the box's width (which is what every percentage padding resolves against, vertical
+  ones too; a vertical pad is scaled when a `space` of another shape is stretched onto the picture).
+  The overlay's viewBox grows by the same amounts — `-padLeft -padTop U H+padTop+padBottom`, with
+  `U = W + padLeft + padRight` — and the shapes keep their coordinates. A fence that stays inside the
+  picture, the usual case, gets no padding and no background at all.
 - **Errors never blank the figure.** A line that does not parse is skipped and reported — line number
   and reason — in a small list under the picture, in the style `block-wavedrom` reports its errors.
   Everything that did parse is drawn.

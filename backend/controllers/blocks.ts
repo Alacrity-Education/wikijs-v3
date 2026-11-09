@@ -38,17 +38,17 @@ async function routes(app: FastifyInstance) {
     const customRoot =
       block && siteId ? await WIKI.models.blocks.servingPathFor(siteId, block) : null
 
-    if (!customRoot) {
-      return reply.sendFile(filePath, builtInRoot, { maxAge: '1h' })
-    }
     /*
-      Revalidated rather than held for an hour like a built-in. The file names are the same across
-      versions — `block-xyz.js` is `block-xyz.js` however many times it has been re-imported — and
-      the whole point of uploading a fixed block is that the fix is live. An ETag turns nearly every
-      one of these into an empty 304, which is what makes that affordable.
+      Revalidated on every request rather than held for an hour, built-in and custom alike. The file
+      names are the same across versions -- `block-xyz.js` is `block-xyz.js` however many times it has
+      been re-imported, and a built-in's is the same after every upgrade of the wiki too -- so a cached
+      copy outlives the code it was: an instance upgraded under a reader kept drawing every block with
+      the previous release's component for up to an hour, and the fix somebody uploaded a custom block
+      for was not live. An ETag turns nearly every one of these into an empty 304, which is what makes
+      that affordable; the module itself is kept by the browser for the life of the page regardless.
     */
     reply.header('Cache-Control', 'public, no-cache')
-    return reply.sendFile(filePath, customRoot, { cacheControl: false })
+    return reply.sendFile(filePath, customRoot ?? builtInRoot, { cacheControl: false })
   })
 }
 

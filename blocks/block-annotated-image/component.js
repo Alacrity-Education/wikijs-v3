@@ -410,6 +410,17 @@ function cssWidth(value) {
   return match[2] === '%' ? `${Number(match[1])}%` : `${Number(match[1])}px`
 }
 
+/**
+ * The box a run of text is likely to take, for `bounds` — estimated, since nothing has been laid out
+ * when it is asked: 0.6 em a character across, and 0.6 em either side of the line it is centred on.
+ * Generous for most text, which is the side to err on when the answer decides whether a label is cut.
+ */
+function textBox(text, x, y, size, anchor) {
+  const span = [...String(text)].length * size * 0.6
+  const left = anchor === 'middle' ? x - span / 2 : anchor === 'end' ? x - span : x
+  return [left, y - size * 0.6, left + span, y + size * 0.6]
+}
+
 /** A rounded number for an SVG attribute: sub-pixel precision is plenty, and the markup stays short. */
 function n(value) {
   return Math.round(value * 100) / 100
@@ -603,6 +614,10 @@ export class BlockAnnotatedImageElement extends LitElement {
       .picture {
         position: relative;
         align-self: start;
+      }
+      /* -> Only round an annotation that reaches past the picture: the legend's dark, so it reads as frame */
+      .picture.is-padded {
+        background: #121620;
       }
       .picture img {
         display: block;
@@ -959,12 +974,27 @@ export class BlockAnnotatedImageElement extends LitElement {
       }
     }
 
+    /*
+      The extent of everything drawn, in the same units as the shapes, so the picture can be padded
+      out to hold an annotation placed past its edge — a label beside a part at the rim, a disc on a
+      box drawn round the whole board. Each shape and mark adds its own boxes through `grow`.
+    */
+    // -> Seeded with the picture less the breathing room below, so a fence inside it pads nothing
+    const room = sizes.stroke
+    const bounds = [room, room, width - room, height - room]
+    const grow = (x0, y0, x1, y1) => {
+      bounds[0] = Math.min(bounds[0], x0)
+      bounds[1] = Math.min(bounds[1], y0)
+      bounds[2] = Math.max(bounds[2], x1)
+      bounds[3] = Math.max(bounds[3], y1)
+    }
+
     // -> A static figure never highlights, whatever was set before it was made static
     const active = this.interactive ? this._active : null
     const outlines = []
     const marks = []
     for (const shape of shapes) {
-      const drawn = this._shape(shape, { sizes, at, length, width })
+      const drawn = this._shape(shape, { sizes, at, length, width, grow })
       const group = (content) => {
         const dim = active !== null && shape.id !== active
         return shape.id === null || !this.interactive
@@ -976,30 +1006,75 @@ export class BlockAnnotatedImageElement extends LitElement {
               @click="${(event) => this._tap(shape.id, event)}">${content}</g>`
       }
       outlines.push(group(drawn.body))
-      const mark = this._mark(shape, drawn, discOwners.has(shape), sizes, at)
+      const mark = this._mark(shape, drawn, discOwners.has(shape), sizes, at, grow)
       if (mark) {
         marks.push(group(mark))
       }
     }
 
+    // -> One stroke of breathing room, so a halo does not end exactly on the edge it was kept inside
+    const pad = {
+      top: Math.max(0, room - bounds[1]),
+      right: Math.max(0, bounds[2] + room - width),
+      bottom: Math.max(0, bounds[3] + room - height),
+      left: Math.max(0, room - bounds[0])
+    }
+    const across = width + pad.left + pad.right
+    const down = height + pad.top + pad.bottom
+
     // -> Discs and labels over every outline, so a later box never runs through an earlier label
-    return svg`<svg
-      class="overlay ${this.interactive ? '' : 'is-static'}"
-      viewBox="0 0 ${n(width)} ${n(height)}"
-      preserveAspectRatio="none"
-      role="img"
-      aria-label="${this._alt || 'Annotated image'}">${outlines}${marks}</svg>`
+    return {
+      style: this._padding(pad, across, width, height),
+      svg: svg`<svg
+        class="overlay ${this.interactive ? '' : 'is-static'}"
+        viewBox="${n(-pad.left)} ${n(-pad.top)} ${n(across)} ${n(down)}"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label="${this._alt || 'Annotated image'}">${outlines}${marks}</svg>`
+    }
+  }
+
+  /**
+   * The picture box's padding, for annotations that reach past the picture.
+   *
+   * Every percentage padding resolves against the containing block's WIDTH, the vertical ones
+   * included — which is what makes this exact: the picture box is `across` units wide, the image in
+   * its content box `width` of them, so each side's share of `across` is its share of the box. A
+   * vertical pad is then scaled by how much taller a unit is than it is wide, which is 1 unless a
+   * `space` of another shape is stretched onto the picture. The overlay, absolutely placed, already
+   * measures against the padding box, so with the viewBox moved out to match nothing else changes.
+   */
+  _padding(pad, across, width, height) {
+    if (!pad.top && !pad.right && !pad.bottom && !pad.left) {
+      return ''
+    }
+    const tall = this._natural.height / this._natural.width / (height / width)
+    const share = (units, factor = 1) => `${((units * factor) / across) * 100}%`
+    return `padding: ${share(pad.top, tall)} ${share(pad.right)} ${share(pad.bottom, tall)} ${share(pad.left)}`
   }
 
   /**
    * One shape's outline, in two passes — a wide dark stroke, then the coloured one over it — and the
    * point its disc goes to when `at` does not say otherwise.
    */
-  _shape(shape, { sizes, at, length, width }) {
+  _shape(shape, { sizes, at, length, width, grow }) {
     const colour = this._colourOf(shape)
     const stroke = shape.options.width ?? sizes.stroke
     const halo = stroke * 2
     const points = shape.points.map(at)
+    // -> Half of the two passes together: the coloured stroke and the dark one under it
+    const reach = (stroke + stroke + halo) / 2
+    const around = ([x, y], r) => grow(x - r, y - r, x + r, y + r)
+    if (
+      shape.kind !== 'text' &&
+      shape.kind !== 'tri' &&
+      shape.kind !== 'circle' &&
+      shape.kind !== 'pin'
+    ) {
+      for (const point of points) {
+        around(point, reach)
+      }
+    }
     // -> In multiples of the stroke, so a thicker line has longer dashes rather than dots
     const dash = shape.options.dashed ? `${n(stroke * 3)} ${n(stroke * 2)}` : nothing
     const cap = shape.options.dashed ? 'butt' : 'round'
@@ -1026,6 +1101,7 @@ export class BlockAnnotatedImageElement extends LitElement {
       case 'pin': {
         const [[cx, cy]] = points
         const r = shape.radius ? length(shape.radius, width) : sizes.pin
+        around([cx, cy], r + reach)
         return {
           body: twice(
             (paint, w) => svg`<circle
@@ -1075,6 +1151,9 @@ export class BlockAnnotatedImageElement extends LitElement {
             [base[0] + uy * half, base[1] - ux * half]
           ]
           const triangle = corners.map(([x, y]) => `${n(x)},${n(y)}`).join(' ')
+          for (const corner of corners) {
+            around(corner, halo / 2)
+          }
           head = svg`<polygon points="${triangle}" fill="${HALO}" stroke="${HALO}"
               stroke-width="${n(halo)}" stroke-linejoin="round" />
             <polygon points="${triangle}" fill="${colour}" />`
@@ -1099,6 +1178,7 @@ export class BlockAnnotatedImageElement extends LitElement {
         const [ux, uy] = DIRECTIONS[shape.direction]
         const size = sizes.tri
         const half = size * 0.6
+        around([x, y], size)
         const tip = [x + (ux * size) / 2, y + (uy * size) / 2]
         const base = [x - (ux * size) / 2, y - (uy * size) / 2]
         const triangle = [
@@ -1121,10 +1201,12 @@ export class BlockAnnotatedImageElement extends LitElement {
       }
       case 'text': {
         const [[x, y]] = points
+        const size = shape.options.size ?? sizes.label
+        grow(...textBox(shape.text, x, y, size, shape.options.anchor ?? 'middle'))
         return {
           body: this._text(shape.text, x, y, {
             colour,
-            size: shape.options.size ?? sizes.label,
+            size,
             halo: sizes.stroke * 2,
             anchor: shape.options.anchor ?? 'middle',
             weight: shape.options.bold ? 700 : 600
@@ -1149,7 +1231,7 @@ export class BlockAnnotatedImageElement extends LitElement {
    * The disc of an id and the label of a shape, at the shape's anchor or where `at` puts them.
    * A label beside a disc starts past the disc; one without starts at the anchor itself.
    */
-  _mark(shape, drawn, hasDisc, sizes, at) {
+  _mark(shape, drawn, hasDisc, sizes, at, grow) {
     if (shape.kind === 'text') {
       return null
     }
@@ -1157,6 +1239,8 @@ export class BlockAnnotatedImageElement extends LitElement {
     const parts = []
     const radius = sizes.disc(shape.id)
     if (hasDisc) {
+      const outer = radius + sizes.stroke
+      grow(anchor[0] - outer, anchor[1] - outer, anchor[0] + outer, anchor[1] + outer)
       parts.push(svg`<circle cx="${n(anchor[0])}" cy="${n(anchor[1])}" r="${n(radius)}"
         fill="${drawn.colour}" stroke="${HALO}" stroke-width="${n(sizes.stroke)}" />`)
       parts.push(
@@ -1172,10 +1256,12 @@ export class BlockAnnotatedImageElement extends LitElement {
     if (shape.options.label) {
       const gap = sizes.stroke * 2
       const x = anchor[0] + (hasDisc ? radius + gap : gap)
+      const size = shape.options.size ?? sizes.label
+      grow(...textBox(shape.options.label, x, anchor[1], size, 'start'))
       parts.push(
         this._text(shape.options.label, x, anchor[1], {
           colour: drawn.colour,
-          size: shape.options.size ?? sizes.label,
+          size,
           halo: sizes.stroke * 2,
           anchor: 'start',
           weight: 600
@@ -1253,6 +1339,8 @@ export class BlockAnnotatedImageElement extends LitElement {
       ? this.panel
       : 'below'
     const showLegend = panel !== 'none' && this._entries.length > 0
+    // -> Drawn first, since the picture box's padding depends on how far the annotations reach
+    const overlay = this._natural && !this._failed ? this._overlay() : null
     // -> Whether a width sizes the picture's track (a legend beside it) or the whole figure
     const side = showLegend && (panel === 'right' || panel === 'left')
     const naturalWidth = this._natural && !this._failed ? `${this._natural.width}px` : null
@@ -1266,7 +1354,9 @@ export class BlockAnnotatedImageElement extends LitElement {
           class="frame ${width ? 'has-width' : ''} ${side ? '' : 'is-stacked'}"
           style="${width ? `--figure-width: ${width}` : ''}">
           <div class="layout is-${showLegend ? panel : 'none'}">
-            <div class="picture">
+            <div
+              class="picture ${overlay?.style ? 'is-padded' : ''}"
+              style="${overlay?.style ?? ''}">
               ${
                 this._failed
                   ? html`<div class="missing">
@@ -1278,7 +1368,7 @@ export class BlockAnnotatedImageElement extends LitElement {
                       @load="${this._onLoad}"
                       @error="${() => (this._failed = true)}" />`
               }
-              ${this._natural && !this._failed ? this._overlay() : null}
+              ${overlay?.svg ?? null}
             </div>
             ${showLegend ? this._legend() : null}
           </div>
