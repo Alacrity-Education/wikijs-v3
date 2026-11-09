@@ -586,7 +586,11 @@ export class BlockAnnotatedImageElement extends LitElement {
         width: 100%;
         max-width: var(--natural-width, 100%);
         border-radius: 5px;
-        overflow: hidden;
+        /*
+          clip, not hidden: both round the corners off, but hidden also makes the grid the box a sticky
+          child sticks to, which never scrolls -- and the picture beside a long legend is sticky.
+        */
+        overflow: clip;
       }
       .layout.is-right {
         grid-template-columns: minmax(0, 1fr) minmax(220px, 30%);
@@ -604,6 +608,18 @@ export class BlockAnnotatedImageElement extends LitElement {
       .layout.is-right,
       .layout.is-left {
         background: #121620;
+      }
+      /*
+        Beside a long legend the picture would scroll away while the reader moves down the entries --
+        and with reveal="hover" the picture is what they are looking at. Stuck under the app bar
+        instead, for as long as its row lasts: a grid item is positioned within its own cell, which is
+        the full height of the row, and sticky is positioned too, so the overlay still measures
+        against it.
+      */
+      .layout.is-right .picture,
+      .layout.is-left .picture {
+        position: sticky;
+        top: 80px;
       }
       .figure.is-center .layout {
         margin-inline: auto;

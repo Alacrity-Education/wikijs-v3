@@ -166,7 +166,7 @@ per thing. A shape with no id and no colour is `white`.
   it when the block is narrower than about 640 px (a container query); `"below"` (the default) and
   `"above"` stack; `"none"` draws no panel, list or not. Beside, the whole row takes the panel's
   `#121620`, so a picture shorter or narrower than its legend sits at the top of its column on the
-  same dark rather than over the page's background.
+  same dark rather than over the page's background. The picture is also sticky there, so it stays in view while a long legend is scrolled.
 - The caption, when given, sits under everything, styled as other blocks style theirs.
 - **The figure's width** — the picture and a legend beside it, together — is the `width` prop when
   it is given, otherwise the `width` attribute the renderer wrote on the image from markdown-it-imsize's
