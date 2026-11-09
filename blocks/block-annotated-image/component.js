@@ -634,6 +634,15 @@ export class BlockAnnotatedImageElement extends LitElement {
           grid-template-columns: minmax(0, 1fr);
           max-width: var(--natural-width, 100%);
         }
+        /*
+          Stacked, the picture's cell is exactly its own height and sticky has nowhere to go -- yet
+          Chrome still slides it down by the offset, over the legend that follows. Plain flow here.
+        */
+        .layout.is-right .picture,
+        .layout.is-left .picture {
+          position: relative;
+          top: auto;
+        }
         .layout.is-left .legend {
           order: 0;
         }
@@ -903,6 +912,8 @@ export class BlockAnnotatedImageElement extends LitElement {
      */
     this._shown = null
     this._resize = null
+    this._activeBy = null
+    this._outside = null
     this._measured = null
     /** The id being pointed at, from the legend or the picture; null when nothing is. */
     this._active = null
@@ -958,6 +969,7 @@ export class BlockAnnotatedImageElement extends LitElement {
     super.disconnectedCallback()
     this._resize?.disconnect()
     this._resize = null
+    this._unwatchOutside()
   }
 
   /**
@@ -1024,25 +1036,73 @@ export class BlockAnnotatedImageElement extends LitElement {
   */
   _enter(id, event) {
     if (event.pointerType === 'mouse') {
-      this._active = id
+      this._activate(id, 'mouse')
     }
   }
 
   _leave(id, event) {
-    if (event.pointerType === 'mouse' && this._active === id) {
+    if (event.pointerType === 'mouse' && this._active === id && this._activeBy === 'mouse') {
       this._active = null
     }
   }
 
+  /*
+    A tap sticks. Touch has no hover, so a tap is the only way a phone lights an entry up -- and it has
+    to stay lit while the finger goes to the picture to look. It stays until a tap lands outside the
+    block (`_watchOutside`), or another entry is tapped. Not a toggle: a tap also focuses the entry,
+    and with a toggle the focus set the id and the tap that followed cleared it again, so that every
+    entry took two taps to light.
+  */
   _tap(id, event) {
     if (event.pointerType !== 'mouse') {
-      this._active = this._active === id ? null : id
+      this._activate(id, 'touch')
+    }
+  }
+
+  /*
+    Keyboard focus only. A tap focuses the entry too, and `_tap` is the one that decides for a tap;
+    `:focus-visible` is how the browser tells the two apart.
+  */
+  _focus(id, event) {
+    if (event.target.matches(':focus-visible')) {
+      this._activate(id, 'keyboard')
     }
   }
 
   _blur(id) {
-    if (this._active === id) {
+    if (this._active === id && this._activeBy === 'keyboard') {
       this._active = null
+    }
+  }
+
+  _activate(id, by) {
+    this._active = id
+    this._activeBy = by
+    if (by === 'touch') {
+      this._watchOutside()
+    } else {
+      this._unwatchOutside()
+    }
+  }
+
+  /** Clear a tapped id when the next tap lands anywhere outside the block. */
+  _watchOutside() {
+    if (this._outside) {
+      return
+    }
+    this._outside = (event) => {
+      if (!event.composedPath().includes(this)) {
+        this._active = null
+        this._unwatchOutside()
+      }
+    }
+    document.addEventListener('pointerdown', this._outside, true)
+  }
+
+  _unwatchOutside() {
+    if (this._outside) {
+      document.removeEventListener('pointerdown', this._outside, true)
+      this._outside = null
     }
   }
 
@@ -1453,7 +1513,7 @@ export class BlockAnnotatedImageElement extends LitElement {
           tabindex="0"
           @pointerenter="${(event) => this._enter(id, event)}"
           @pointerleave="${(event) => this._leave(id, event)}"
-          @focus="${() => (this._active = id)}"
+          @focus="${(event) => this._focus(id, event)}"
           @blur="${() => this._blur(id)}"
           @click="${(event) => this._tap(id, event)}">
           <span class="disc" aria-hidden="true">${id}</span>

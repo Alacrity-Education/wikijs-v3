@@ -112,7 +112,7 @@ and height respectively, whatever the space is.
 
 A line that starts with an id belongs to that id. The **first** shape of an id gets a filled disc at
 its anchor carrying the id, and every shape of the id lights up together: hovering (or focusing, or
-tapping) a legend entry dims every other id's shapes; hovering a shape highlights its legend entry.
+tapping) a legend entry dims every other id's shapes; hovering a shape highlights its legend entry. On touch there is no hover: a tap lights an entry and keeps it lit until a tap lands outside the block or on another entry; keyboard focus lights an entry for as long as it holds focus.
 Several shapes may share an id — a box and the leader pointing at it, or the two pins of a pair.
 
 An id is tied to a legend entry: when every id in the fence is a number, id *n* is the *n*-th entry;
