@@ -47,7 +47,7 @@ const MIN_STROKE_PX = 1.75
 const DISC_INK = '#141414'
 
 /** The shapes a line may draw. What each takes after its name is read in `readPositionals`. */
-const SHAPES = ['box', 'circle', 'pin', 'line', 'arrow', 'poly', 'tri', 'text']
+const SHAPES = ['box', 'circle', 'pin', 'line', 'arrow', 'poly', 'tri', 'text', 'callout']
 
 /** The shapes drawn as a stroke, and so the ones `dashed` and `width` mean anything for. */
 const STROKED = ['box', 'circle', 'pin', 'line', 'arrow', 'poly']
@@ -66,7 +66,8 @@ const OPTION_SHAPES = {
   anchor: ['text'],
   bold: ['text'],
   label: SHAPES.filter((shape) => shape !== 'text'),
-  at: SHAPES
+  // -> A callout is nothing but its disc, so moving the disc is moving the callout: write the point
+  at: SHAPES.filter((shape) => shape !== 'callout')
 }
 
 const DIRECTIONS = {
@@ -184,6 +185,8 @@ function readPositionals(kind, tokens) {
       return { points: [point('two opposite corners'), point('two opposite corners')], used }
     case 'pin':
       return { points: [point('a centre')], used }
+    case 'callout':
+      return { points: [point('a position')], used }
     case 'circle': {
       const points = [point('a centre')]
       const token = tokens[used]
@@ -361,6 +364,10 @@ export function parseAnnotations(source) {
       if (!SHAPES.includes(kind) || tokens[at].quoteAt >= 0) {
         throw new Error(`unknown shape "${kind}" — one of ${SHAPES.join(', ')}`)
       }
+      // -> A disc with no id has nothing to say: a callout is the id, put where the part is
+      if (kind === 'callout' && id === null) {
+        throw new Error('callout needs an id')
+      }
       const rest = tokens.slice(at + 1)
       const { used, ...fields } = readPositionals(kind, rest)
       const options = readOptions(kind, rest.slice(used))
@@ -507,6 +514,14 @@ export class BlockAnnotatedImageElement extends LitElement {
         hint: 'Whether hovering a legend entry or a shape highlights the pair. Off for a figure that should only be looked at.',
         // -> Stated, so that a toggle switched off and then on again writes nothing into the page
         default: true
+      },
+      {
+        name: 'reveal',
+        type: 'select',
+        label: 'Reveal',
+        options: ['always', 'hover'],
+        hint: 'hover keeps every shape tied to a legend entry invisible until that entry is hovered, focused or tapped.',
+        default: 'always'
       },
       {
         name: 'caption',
@@ -666,6 +681,25 @@ export class BlockAnnotatedImageElement extends LitElement {
         pointer-events: visiblePainted;
         transition: opacity 0.15s;
       }
+      /*
+        reveal="hover": hidden, and so out of the pointer's way too, until the legend asks for it.
+        Visibility steps at the end of the fade going out and at its start coming in.
+      */
+      .shape.is-hidden {
+        visibility: hidden;
+        opacity: 0;
+      }
+      .overlay.is-revealing .shape {
+        transition:
+          opacity 0.12s,
+          visibility 0.12s;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .shape,
+        .overlay.is-revealing .shape {
+          transition: none;
+        }
+      }
       .shape.is-dim {
         opacity: 0.35;
       }
@@ -805,6 +839,12 @@ export class BlockAnnotatedImageElement extends LitElement {
       align: { type: String },
 
       /**
+       * `always`, or `hover` to show the shapes of an id only while its legend entry is active
+       * @type {string}
+       */
+      reveal: { type: String },
+
+      /**
        * The figure's width: `60%` of the column, or `480` pixels. Empty follows the image's own size
        * @type {string}
        */
@@ -833,6 +873,7 @@ export class BlockAnnotatedImageElement extends LitElement {
     this.align = 'left'
     this.width = ''
     this.interactive = true
+    this.reveal = 'always'
     this._src = ''
     /** The `width` attribute the renderer wrote on the image, from markdown-it-imsize's `=WxH`. */
     this._imageWidth = ''
@@ -1078,21 +1119,30 @@ export class BlockAnnotatedImageElement extends LitElement {
 
     // -> A static figure never highlights, whatever was set before it was made static
     const active = this.interactive ? this._active : null
+    /*
+      The legend is the only way to reveal a hidden shape, so a static figure shows everything. The
+      bounds below are taken from every shape, hidden or not, so revealing one never moves the layout.
+    */
+    const revealing = this.reveal === 'hover' && this.interactive
     const outlines = []
     const marks = []
     for (const shape of shapes) {
       const drawn = this._shape(shape, { sizes, at, length, width, grow })
       const group = (content) => {
         const dim = active !== null && shape.id !== active
+        const hidden = revealing && shape.id !== null && shape.id !== active
+        const classes = `shape ${dim ? 'is-dim' : ''} ${hidden ? 'is-hidden' : ''}`
         return shape.id === null || !this.interactive
-          ? svg`<g class="shape ${dim ? 'is-dim' : ''}">${content}</g>`
+          ? svg`<g class="${classes}">${content}</g>`
           : svg`<g
-              class="shape ${dim ? 'is-dim' : ''}"
+              class="${classes}"
               @pointerenter="${(event) => this._enter(shape.id, event)}"
               @pointerleave="${(event) => this._leave(shape.id, event)}"
               @click="${(event) => this._tap(shape.id, event)}">${content}</g>`
       }
-      outlines.push(group(drawn.body))
+      if (drawn.body !== nothing) {
+        outlines.push(group(drawn.body))
+      }
       const mark = this._mark(shape, drawn, discOwners.has(shape), sizes, at, grow)
       if (mark) {
         marks.push(group(mark))
@@ -1113,7 +1163,7 @@ export class BlockAnnotatedImageElement extends LitElement {
     return {
       style: this._padding(pad, across, width, height),
       svg: svg`<svg
-        class="overlay ${this.interactive ? '' : 'is-static'}"
+        class="overlay ${this.interactive ? '' : 'is-static'} ${revealing ? 'is-revealing' : ''}"
         viewBox="${n(-pad.left)} ${n(-pad.top)} ${n(across)} ${n(down)}"
         preserveAspectRatio="none"
         role="img"
@@ -1153,6 +1203,7 @@ export class BlockAnnotatedImageElement extends LitElement {
     const reach = (stroke + stroke + halo) / 2
     const around = ([x, y], r) => grow(x - r, y - r, x + r, y + r)
     if (
+      shape.kind !== 'callout' &&
       shape.kind !== 'text' &&
       shape.kind !== 'tri' &&
       shape.kind !== 'circle' &&
@@ -1286,6 +1337,9 @@ export class BlockAnnotatedImageElement extends LitElement {
           colour
         }
       }
+      case 'callout':
+        // -> No outline at all: the disc `_mark` draws at the point is the whole of it
+        return { body: nothing, anchor: points[0], colour }
       case 'text': {
         const [[x, y]] = points
         const size = shape.options.size ?? sizes.label
@@ -1325,7 +1379,9 @@ export class BlockAnnotatedImageElement extends LitElement {
     const anchor = shape.options.at ? at(shape.options.at) : drawn.anchor
     const parts = []
     const radius = sizes.disc(shape.id)
-    if (hasDisc) {
+    // -> A callout's disc is all it draws, so it has one even when another shape of its id came first
+    const disc = hasDisc || shape.kind === 'callout'
+    if (disc) {
       const outer = radius + sizes.stroke
       grow(anchor[0] - outer, anchor[1] - outer, anchor[0] + outer, anchor[1] + outer)
       parts.push(svg`<circle cx="${n(anchor[0])}" cy="${n(anchor[1])}" r="${n(radius)}"
@@ -1342,7 +1398,7 @@ export class BlockAnnotatedImageElement extends LitElement {
     }
     if (shape.options.label) {
       const gap = sizes.stroke * 2
-      const x = anchor[0] + (hasDisc ? radius + gap : gap)
+      const x = anchor[0] + (disc ? radius + gap : gap)
       const size = shape.options.size ?? sizes.label
       grow(...textBox(shape.options.label, x, anchor[1], size, 'start'))
       parts.push(

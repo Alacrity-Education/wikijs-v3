@@ -92,6 +92,7 @@ and height respectively, whatever the space is.
 | `poly P P P…` | three or more points | closed polygon outline |
 | `tri P dir` | position, `up`/`down`/`left`/`right` | small filled triangle pointing that way — an orientation marker |
 | `text P "string"` | position, the text | text on the picture, with a dark halo so it reads on copper |
+| `id callout P` | position | the id's disc there and nothing else (plus its `label`) — points at a part without boxing it. Needs an id; always draws its disc, even when an earlier shape of the id owns the first one; takes only `color`, `label` and `size` |
 
 ### Options
 
@@ -105,7 +106,7 @@ and height respectively, whatever the space is.
 | `anchor=start\|middle\|end` | `text` | horizontal anchor; default `middle` |
 | `bold` | `text` | bold face |
 | `label="…"` | any but `text` | short text drawn next to the shape's anchor, in its colour, with a halo |
-| `at=P` | any | where the id disc (and `label`) sits, overriding the anchor below |
+| `at=P` | any but `callout` | where the id disc (and `label`) sits, overriding the anchor below |
 
 ### Ids, discs and the legend
 
@@ -219,6 +220,7 @@ per thing. A shape with no id and no colour is `white`.
 | `scale` | number | `1` | multiplies every default size of §3 |
 | `width` | string | | the figure's width: `60%` of the column, or `480` pixels; empty follows the image's own `width`, or the column |
 | `interactive` | boolean | `true` | whether pointing at a legend entry or a shape highlights the pair; `"false"` is read as off |
+| `reveal` | select `always` `hover` | `always` | `hover` hides every shape with an id — outline, disc and label, by `visibility` so it takes no pointer either — until its legend entry is hovered, focused or tapped, with a 120 ms fade that `prefers-reduced-motion` turns off; shapes with no id stay visible. With `interactive` off it acts as `always`. The padding bounds count hidden shapes, so revealing never moves the layout |
 | `caption` | string | | shown under the figure |
 | `align` | select `left` `center` | `left` | as every other figure block |
 
