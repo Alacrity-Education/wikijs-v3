@@ -374,6 +374,16 @@ class WikiConverter extends Html5Converter {
     return WIKI_BLOCK_STYLE.test(node.getStyle() ?? '')
   }
 
+  /** The tag of the nearest `[block-*]` block above `node`, or null -- see `codeBlock`'s `insideBlock`. */
+  enclosingWikiBlock(node) {
+    for (let parent = node.getParent(); parent; parent = parent.getParent?.()) {
+      if (this.isWikiBlock(parent)) {
+        return parent.getStyle()
+      }
+    }
+    return null
+  }
+
   /**
    * An admonition, as the blockquote the content stylesheet draws.
    *
@@ -523,6 +533,11 @@ ${await node.content()}
    *
    * `highlight` accepts AsciiDoc's `1..2` and markdown's `1-2` alike -- the dots are rewritten to a
    * hyphen on the way in, since nobody arriving from a markdown page will write two of them.
+   *
+   * A self-drawing listing (`[source,mermaid]`, `[source,plantuml]`) takes its block's props the same
+   * way -- `[source,mermaid,theme=dark]` -- as the props of the block it becomes
+   * (`SELF_DRAWING_FENCES`), and is left as a bare `<pre>` when it sits inside that block, which
+   * draws it.
    */
   async convert_listing(node) {
     /*
@@ -533,10 +548,21 @@ ${await node.content()}
       blocks silently lost their line numbers and the last row of a long one was never washed by a
       `highlight` that named it.
     */
-    const html = codeBlock(`${node.getSource()}\n`, node.getAttribute('language') ?? '', {
-      linesstart: node.getAttribute('start'),
-      lineshighlight: (node.getAttribute('highlight') ?? '').replaceAll('..', '-')
-    })
+    const html = codeBlock(
+      `${node.getSource()}\n`,
+      node.getAttribute('language') ?? '',
+      {
+        linesstart: node.getAttribute('start'),
+        lineshighlight: (node.getAttribute('highlight') ?? '').replaceAll('..', '-'),
+        // -> The props a self-drawing listing may set, across the blocks `SELF_DRAWING_FENCES` names
+        theme: node.getAttribute('theme'),
+        server: node.getAttribute('server'),
+        format: node.getAttribute('format'),
+        caption: node.getAttribute('caption'),
+        align: node.getAttribute('align')
+      },
+      { insideBlock: this.enclosingWikiBlock(node) }
+    )
     const line = this.lineAttr(node)
     const title = node.hasTitle() ? node.captionedTitle() : ''
     /*
@@ -547,9 +573,10 @@ ${await node.content()}
     if (title && html.startsWith('<pre')) {
       return `<div class="codeblock-titled hljs"${line}><div class="codeblock-title">${title}</div>${html}</div>`
     }
-    // -> Every branch of `codeBlock` opens with `<pre`, bar a `diagram` listing's `<figure>`, which has
-    //    no title bar to hold and takes the line stamp the same way
-    return html.replace(/^<(pre|figure)/, `<$1${line}`)
+    // -> Every branch of `codeBlock` opens with `<pre`, bar a `diagram` listing's `<figure>` and a
+    //    self-drawing listing's block, neither of which has a title bar to hold -- a title on one is
+    //    ignored -- and both take the line stamp the same way
+    return html.replace(/^<(pre|figure|block-[a-z]+)/, `<$1${line}`)
   }
 
   /**
