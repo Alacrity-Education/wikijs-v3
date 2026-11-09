@@ -544,11 +544,12 @@ ${await node.content()}
       shape `markdown.js` builds and for the same reason: a header inside the `<pre>` would slide
       sideways with the code and be indented by the gutter's padding.
     */
-    if (title) {
+    if (title && html.startsWith('<pre')) {
       return `<div class="codeblock-titled hljs"${line}><div class="codeblock-title">${title}</div>${html}</div>`
     }
-    // -> Every branch of `codeBlock` opens with `<pre`
-    return html.replace(/^<pre/, `<pre${line}`)
+    // -> Every branch of `codeBlock` opens with `<pre`, bar a `diagram` listing's `<figure>`, which has
+    //    no title bar to hold and takes the line stamp the same way
+    return html.replace(/^<(pre|figure)/, `<$1${line}`)
   }
 
   /**
