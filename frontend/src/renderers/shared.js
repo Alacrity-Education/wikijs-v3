@@ -300,9 +300,10 @@ function lineRows(lineCount, lineStart, highlights) {
 
 /**
  * The fence languages that are a diagram's source rather than code: left for the block holding them to
- * draw, and given none of a code block's furniture.
+ * draw, and given none of a code block's furniture. `annotations` is one too, though what it describes
+ * is drawn over a picture rather than on its own: `block-annotated-image` reads the shapes out of it.
  */
-export const DIAGRAM_LANGUAGES = ['kroki', 'mermaid', 'plantuml']
+export const DIAGRAM_LANGUAGES = ['annotations', 'kroki', 'mermaid', 'plantuml']
 
 /**
  * The fence languages that draw themselves when written bare, each with the block that draws it and
@@ -390,10 +391,10 @@ export function codeBlock(str, lang, attributes, options = {}) {
   if (DIAGRAM_LANGUAGES.includes(lang)) {
     /*
       Left as source, deliberately: a diagram is drawn by the block whose body it is —
-      `block-diagram` for mermaid, `block-plantuml` and `block-kroki` for the others — and each
-      reads the text out of this `pre`. A fence on its own outside a block keeps the panel the
-      stylesheet gives it, which says "a diagram nobody has drawn" rather than pretending to be
-      a code sample.
+      `block-diagram` for mermaid, `block-plantuml` and `block-kroki` for the others, and
+      `block-annotated-image` for the shapes it lays over its picture — and each reads the text out
+      of this `pre`. A fence on its own outside a block keeps the panel the stylesheet gives it,
+      which says "a diagram nobody has drawn" rather than pretending to be a code sample.
     */
     return `<pre class="codeblock-${lang}"><code>${escape(str)}</code></pre>`
   }
