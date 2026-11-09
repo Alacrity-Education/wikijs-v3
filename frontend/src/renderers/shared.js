@@ -300,10 +300,9 @@ function lineRows(lineCount, lineStart, highlights) {
 
 /**
  * The fence languages that are a diagram's source rather than code: left for the block holding them to
- * draw, and given none of a code block's furniture. `annotations` is one too, though what it describes
- * is drawn over a picture rather than on its own: `block-annotated-image` reads the shapes out of it.
+ * draw, and given none of a code block's furniture.
  */
-export const DIAGRAM_LANGUAGES = ['annotations', 'kroki', 'mermaid', 'plantuml']
+export const DIAGRAM_LANGUAGES = ['kroki', 'mermaid', 'plantuml']
 
 /**
  * The fence languages that draw themselves when written bare, each with the block that draws it and
@@ -311,8 +310,7 @@ export const DIAGRAM_LANGUAGES = ['annotations', 'kroki', 'mermaid', 'plantuml']
  */
 export const SELF_DRAWING_FENCES = {
   mermaid: { tag: 'block-diagram', props: ['caption', 'theme', 'align'] },
-  plantuml: { tag: 'block-plantuml', props: ['server', 'format', 'caption', 'align'] },
-  wavedrom: { tag: 'block-wavedrom', props: ['skin', 'caption', 'align'] }
+  plantuml: { tag: 'block-plantuml', props: ['server', 'format', 'caption', 'align'] }
 }
 
 /**
@@ -339,11 +337,11 @@ export function codeBlock(str, lang, attributes, options = {}) {
   const selfDrawing = SELF_DRAWING_FENCES[lang]
   if (selfDrawing) {
     /*
-      A bare ```mermaid or ```wavedrom fence draws itself: it is wrapped in the block that reads the
+      A bare ```mermaid or ```plantuml fence draws itself: it is wrapped in the block that reads the
       source out of the `pre`, so an author need not know a block is involved -- which is also what a
       page written for Wiki.js 2 expects, where a mermaid fence was a diagram on its own. The props the
-      block declares are taken from the fence's own attributes -- ```wavedrom skin=dark caption="SPI
-      write", unbraced like every fence option, since `markdown-it-attrs` claims a braced group for
+      block declares are taken from the fence's own attributes -- ```mermaid theme=dark caption="Login
+      flow", unbraced like every fence option, since `markdown-it-attrs` claims a braced group for
       itself -- and left off when absent, so the block's defaults stay the block's.
 
       Written inside the block already (`:::block-diagram` around a mermaid fence, which is what the
@@ -391,10 +389,10 @@ export function codeBlock(str, lang, attributes, options = {}) {
   if (DIAGRAM_LANGUAGES.includes(lang)) {
     /*
       Left as source, deliberately: a diagram is drawn by the block whose body it is —
-      `block-diagram` for mermaid, `block-plantuml` and `block-kroki` for the others, and
-      `block-annotated-image` for the shapes it lays over its picture — and each reads the text out
-      of this `pre`. A fence on its own outside a block keeps the panel the stylesheet gives it,
-      which says "a diagram nobody has drawn" rather than pretending to be a code sample.
+      `block-diagram` for mermaid, `block-plantuml` and `block-kroki` for the others — and each
+      reads the text out of this `pre`. A fence on its own outside a block keeps the panel the
+      stylesheet gives it, which says "a diagram nobody has drawn" rather than pretending to be
+      a code sample.
     */
     return `<pre class="codeblock-${lang}"><code>${escape(str)}</code></pre>`
   }

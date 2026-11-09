@@ -1789,10 +1789,8 @@
   /*
     Diagram sources -- a mermaid, plantuml or kroki fence -- reach the page as code, and are drawn
     later or not at all. A quiet dashed panel says "this is a diagram that has not been drawn" rather
-    than pretending to be a code sample. So does an annotated image's `annotations` fence, until its
-    block has laid the shapes over the picture.
+    than pretending to be a code sample.
   */
-  pre.codeblock-annotations,
   pre.codeblock-kroki,
   pre.codeblock-mermaid,
   pre.codeblock-plantuml {

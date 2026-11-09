@@ -534,8 +534,8 @@ ${await node.content()}
    * `highlight` accepts AsciiDoc's `1..2` and markdown's `1-2` alike -- the dots are rewritten to a
    * hyphen on the way in, since nobody arriving from a markdown page will write two of them.
    *
-   * A self-drawing listing (`[source,mermaid]`, `[source,wavedrom]`) takes its block's props the same
-   * way -- `[source,wavedrom,skin=dark]`
+   * A self-drawing listing (`[source,mermaid]`, `[source,plantuml]`) takes its block's props the same
+   * way -- `[source,mermaid,theme=dark]`
    * -- as the props of the block it becomes (`SELF_DRAWING_FENCES`), and is left as a bare `<pre>` when
    * it sits inside that block, which draws it.
    */

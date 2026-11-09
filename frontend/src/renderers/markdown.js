@@ -548,7 +548,7 @@ export class MarkdownRenderer {
       `title` becomes a header bar above the block; `linesStart` renumbers the gutter; `linesHighlight`
       washes the rows it names. See `codeBlock` for the last two and `parseFenceAttributes` for the
       shape of all three. A diagram fence ignores them -- it is a source for something else to draw.
-      A self-drawing fence (```mermaid, ```wavedrom) takes its block's props instead, as the block it is
+      A self-drawing fence (```mermaid, ```plantuml) takes its block's props instead, as the block it is
       wrapped in.
 
       The lines the fence spans are stamped into the markup rather than onto the token, since the token
