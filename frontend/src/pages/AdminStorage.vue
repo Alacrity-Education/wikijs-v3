@@ -54,12 +54,12 @@
     <!-- ========================================== -->
     <div class="flex flex-wrap p-4 gap-4" v-if="state.displayMode === `targets`">
       <div class="flex-none">
-        <w-card class="rounded bg-dark">
-          <w-list style="min-width: 300px" padding dark>
+        <w-card class="rounded" :class="dark.isActive ? `bg-dark` : `bg-white`">
+          <w-list style="min-width: 300px" padding :dark="dark.isActive">
             <w-item
               v-for="tgt of state.targets"
               :key="tgt.id"
-              active-class="bg-primary text-white"
+              :active-class="dark.isActive ? `bg-primary text-white` : `bg-primary/15 text-primary`"
               :active="state.selectedTarget === tgt.id"
               :to="`/_admin/` + adminStore.currentSiteId + `/storage/` + tgt.id"
               clickable>
@@ -1291,7 +1291,9 @@ function getTargetSubtitle(target) {
 
 function getTargetSubtitleColor(target) {
   if (state.selectedTarget === target.id) {
-    return 'text-blue-2'
+    // -> Pale blue reads on the filled row of the dark list; on the tinted row of the light one the
+    //    primary itself does, as the label beside it
+    return dark.isActive ? 'text-blue-2' : 'text-primary'
   } else if (target.isEnabled) {
     return 'text-positive'
   } else {
