@@ -385,6 +385,31 @@ function idColour(index) {
   return ID_COLOURS[((index % ID_COLOURS.length) + ID_COLOURS.length) % ID_COLOURS.length]
 }
 
+/**
+ * An attribute that means "off" when it says so — the converter `block-gallery` reads
+ * `unlockAspectRatio` with, for the same reason: MDC writes every prop with a value, and Lit's own
+ * Boolean converter reads any string at all as true, `interactive="false"` included.
+ */
+const boolean = {
+  converter: {
+    fromAttribute: (value) => value !== null && value !== 'false',
+    toAttribute: (value) => (value ? 'true' : null)
+  }
+}
+
+/**
+ * A figure width as CSS: `60%` stays a share of the column, `480` or `480px` is pixels. Anything
+ * else is null, and the figure keeps its default width — a size the author mistyped on the image is
+ * not worth an error panel over a picture that is otherwise fine.
+ */
+function cssWidth(value) {
+  const match = /^\s*(\d+(?:\.\d+)?|\.\d+)\s*(%|px)?\s*$/i.exec(value ?? '')
+  if (!match || !(Number(match[1]) > 0)) {
+    return null
+  }
+  return match[2] === '%' ? `${Number(match[1])}%` : `${Number(match[1])}px`
+}
+
 /** A rounded number for an SVG attribute: sub-pixel precision is plenty, and the markup stays short. */
 function n(value) {
   return Math.round(value * 100) / 100
@@ -449,6 +474,20 @@ export class BlockAnnotatedImageElement extends LitElement {
         default: 1
       },
       {
+        name: 'width',
+        type: 'string',
+        label: 'Width',
+        hint: "The figure's width: a percentage of the column, e.g. 60%, or pixels, e.g. 480. Empty follows the size written on the image, or the column."
+      },
+      {
+        name: 'interactive',
+        type: 'boolean',
+        label: 'Interactive',
+        hint: 'Whether hovering a legend entry or a shape highlights the pair. Off for a figure that should only be looked at.',
+        // -> Stated, so that a toggle switched off and then on again writes nothing into the page
+        default: true
+      },
+      {
         name: 'caption',
         type: 'string',
         label: 'Caption',
@@ -476,15 +515,10 @@ export class BlockAnnotatedImageElement extends LitElement {
         margin-bottom: 16px;
       }
 
-      /*
-        The container the panel placement is decided against: the block's own width, not the
-        window's, since a block may sit in a narrow column of a wide page.
-      */
       .figure {
         /* -> A figure's own indent and top margin, from the browser; the gap below is set above */
         margin-top: 0;
         margin-inline: 0;
-        container-type: inline-size;
         display: flex;
         flex-direction: column;
         align-items: flex-start;
@@ -492,6 +526,18 @@ export class BlockAnnotatedImageElement extends LitElement {
       }
       .figure.is-center {
         align-items: center;
+      }
+
+      /*
+        The container the panel placement is decided against: the column the block sits in. Stacked,
+        it is also what a width given to the figure sizes (is-stacked below); beside, the frame
+        stays the column and the width goes to the picture's grid track instead, so a side legend
+        keeps the rest of the row rather than being squeezed under a small picture.
+      */
+      .frame {
+        container-type: inline-size;
+        width: 100%;
+        max-width: 100%;
       }
 
       /*
@@ -514,6 +560,9 @@ export class BlockAnnotatedImageElement extends LitElement {
         grid-template-columns: minmax(220px, 30%) minmax(0, 1fr);
         max-width: none;
       }
+      .figure.is-center .layout {
+        margin-inline: auto;
+      }
       .layout.is-left .legend,
       .layout.is-above .legend {
         order: -1;
@@ -526,6 +575,28 @@ export class BlockAnnotatedImageElement extends LitElement {
         }
         .layout.is-left .legend {
           order: 0;
+        }
+      }
+      /* -> A width the author gave is the width, however small the picture is: no natural cap */
+      .frame.has-width .layout {
+        max-width: none;
+      }
+      /* -> Stacked, it sizes the whole figure, but never below what a legend can be read in */
+      .frame.has-width.is-stacked {
+        width: var(--figure-width);
+        min-width: min(100%, 240px);
+      }
+      /* -> Beside, it sizes the picture's track, and the legend takes the rest of the column */
+      .frame.has-width .layout.is-right {
+        grid-template-columns: minmax(0, var(--figure-width)) minmax(220px, 1fr);
+      }
+      .frame.has-width .layout.is-left {
+        grid-template-columns: minmax(220px, 1fr) minmax(0, var(--figure-width));
+      }
+      @container (max-width: 640px) {
+        .frame.has-width .layout.is-right,
+        .frame.has-width .layout.is-left {
+          grid-template-columns: minmax(0, 1fr);
         }
       }
 
@@ -563,6 +634,10 @@ export class BlockAnnotatedImageElement extends LitElement {
       }
       .shape.is-dim {
         opacity: 0.35;
+      }
+      /* -> A static figure: the pointer goes through every shape to the picture */
+      .overlay.is-static .shape {
+        pointer-events: none;
       }
 
       .missing {
@@ -695,6 +770,18 @@ export class BlockAnnotatedImageElement extends LitElement {
        */
       align: { type: String },
 
+      /**
+       * The figure's width: `60%` of the column, or `480` pixels. Empty follows the image's own size
+       * @type {string}
+       */
+      width: { type: String },
+
+      /**
+       * Whether pointing at a legend entry or a shape highlights the pair
+       * @type {boolean}
+       */
+      interactive: boolean,
+
       // Internal Properties
       _src: { state: true },
       _natural: { state: true },
@@ -709,7 +796,11 @@ export class BlockAnnotatedImageElement extends LitElement {
     this.scale = 1
     this.caption = ''
     this.align = 'left'
+    this.width = ''
+    this.interactive = true
     this._src = ''
+    /** The `width` attribute the renderer wrote on the image, from markdown-it-imsize's `=WxH`. */
+    this._imageWidth = ''
     this._alt = ''
     /** The picture's natural size, once it has loaded — the overlay is not drawn before. */
     this._natural = null
@@ -746,6 +837,9 @@ export class BlockAnnotatedImageElement extends LitElement {
 
     if (image) {
       this._alt = image.getAttribute('alt') ?? ''
+      // -> Only the width: the height would fight the picture's own aspect ratio, which is the one
+      //    the overlay is measured against
+      this._imageWidth = image.getAttribute('width') ?? ''
       // -> The renderer has normally written `/_files/…` already, which is left as it is
       this._src = resolveFilePath(image.getAttribute('src') ?? '')
     }
@@ -839,11 +933,18 @@ export class BlockAnnotatedImageElement extends LitElement {
     const unit = width * scale
     const sizes = {
       stroke: unit / 250,
-      disc: unit / 40,
-      discText: unit / 50,
+      discText: unit / 60,
       label: unit / 45,
       pin: unit / 70,
-      tri: unit / 60
+      tri: unit / 60,
+      /*
+        A disc as small as its id allows, so a single digit fills it the way it fills a badge:
+        half the old diameter for one character, two thirds for two, the old size for three or more.
+      */
+      disc: (id) => {
+        const chars = String(id ?? '').length
+        return unit / (chars <= 1 ? 80 : chars === 2 ? 60 : 40)
+      }
     }
     const length = (value, of) => (value.percent ? (value.value / 100) * of : value.value)
     const at = (point) => [length(point.x, width), length(point.y, height)]
@@ -858,13 +959,15 @@ export class BlockAnnotatedImageElement extends LitElement {
       }
     }
 
+    // -> A static figure never highlights, whatever was set before it was made static
+    const active = this.interactive ? this._active : null
     const outlines = []
     const marks = []
     for (const shape of shapes) {
       const drawn = this._shape(shape, { sizes, at, length, width })
       const group = (content) => {
-        const dim = this._active !== null && shape.id !== this._active
-        return shape.id === null
+        const dim = active !== null && shape.id !== active
+        return shape.id === null || !this.interactive
           ? svg`<g class="shape ${dim ? 'is-dim' : ''}">${content}</g>`
           : svg`<g
               class="shape ${dim ? 'is-dim' : ''}"
@@ -881,7 +984,7 @@ export class BlockAnnotatedImageElement extends LitElement {
 
     // -> Discs and labels over every outline, so a later box never runs through an earlier label
     return svg`<svg
-      class="overlay"
+      class="overlay ${this.interactive ? '' : 'is-static'}"
       viewBox="0 0 ${n(width)} ${n(height)}"
       preserveAspectRatio="none"
       role="img"
@@ -1010,8 +1113,8 @@ export class BlockAnnotatedImageElement extends LitElement {
             stroke-width="${n(sizes.stroke * 2)}" stroke-linejoin="round" paint-order="stroke" />`,
           // -> Behind it, on the side it points away from, so the disc never hides what it points at
           anchor: [
-            x - ux * (size / 2 + sizes.disc + sizes.stroke),
-            y - uy * (size / 2 + sizes.disc + sizes.stroke)
+            x - ux * (size / 2 + sizes.disc(shape.id) + sizes.stroke),
+            y - uy * (size / 2 + sizes.disc(shape.id) + sizes.stroke)
           ],
           colour
         }
@@ -1052,8 +1155,9 @@ export class BlockAnnotatedImageElement extends LitElement {
     }
     const anchor = shape.options.at ? at(shape.options.at) : drawn.anchor
     const parts = []
+    const radius = sizes.disc(shape.id)
     if (hasDisc) {
-      parts.push(svg`<circle cx="${n(anchor[0])}" cy="${n(anchor[1])}" r="${n(sizes.disc)}"
+      parts.push(svg`<circle cx="${n(anchor[0])}" cy="${n(anchor[1])}" r="${n(radius)}"
         fill="${drawn.colour}" stroke="${HALO}" stroke-width="${n(sizes.stroke)}" />`)
       parts.push(
         this._text(shape.id, anchor[0], anchor[1], {
@@ -1067,7 +1171,7 @@ export class BlockAnnotatedImageElement extends LitElement {
     }
     if (shape.options.label) {
       const gap = sizes.stroke * 2
-      const x = anchor[0] + (hasDisc ? sizes.disc + gap : gap)
+      const x = anchor[0] + (hasDisc ? radius + gap : gap)
       parts.push(
         this._text(shape.options.label, x, anchor[1], {
           colour: drawn.colour,
@@ -1083,7 +1187,8 @@ export class BlockAnnotatedImageElement extends LitElement {
 
   /**
    * The legend, one entry per list item. An entry is tied to the id whose index it is (`tieIds`);
-   * one with no id is shown without a disc and takes no part in the highlighting.
+   * one with no id is shown without a disc and takes no part in the highlighting. On a static figure
+   * (`interactive` off) no entry does: each keeps its disc, but takes no focus and hears no pointer.
    */
   _legend() {
     const byIndex = new Map([...this._ties].map(([id, index]) => [index, id]))
@@ -1091,8 +1196,11 @@ export class BlockAnnotatedImageElement extends LitElement {
     return html`<ol class="legend">
       ${this._entries.map((entry, index) => {
         const id = byIndex.get(index) ?? null
-        if (id === null) {
-          return html`<li class="entry"><div class="entry-body">${unsafeHTML(entry)}</div></li>`
+        if (id === null || !this.interactive) {
+          return html`<li class="entry" style="${id === null ? '' : `--c: ${colours.get(id)}`}">
+            ${id === null ? null : html`<span class="disc" aria-hidden="true">${id}</span>`}
+            <div class="entry-body">${unsafeHTML(entry)}</div>
+          </li>`
         }
         return html`<li
           class="entry has-id ${this._active === id ? 'is-active' : ''}"
@@ -1145,27 +1253,35 @@ export class BlockAnnotatedImageElement extends LitElement {
       ? this.panel
       : 'below'
     const showLegend = panel !== 'none' && this._entries.length > 0
+    // -> Whether a width sizes the picture's track (a legend beside it) or the whole figure
+    const side = showLegend && (panel === 'right' || panel === 'left')
     const naturalWidth = this._natural && !this._failed ? `${this._natural.width}px` : null
+    // -> The prop first, then the size written on the image; neither leaves the column's width
+    const width = cssWidth(this.width) ?? cssWidth(this._imageWidth)
     return html`
       <figure
         class="figure ${this.align === 'center' ? 'is-center' : ''}"
         style="${naturalWidth ? `--natural-width: ${naturalWidth}` : ''}">
-        <div class="layout is-${panel}">
-          <div class="picture">
-            ${
-              this._failed
-                ? html`<div class="missing">
-                    ${this._alt || 'The picture could not be loaded.'}
-                  </div>`
-                : html`<img
-                    src="${this._src}"
-                    alt="${this._natural ? '' : this._alt}"
-                    @load="${this._onLoad}"
-                    @error="${() => (this._failed = true)}" />`
-            }
-            ${this._natural && !this._failed ? this._overlay() : null}
+        <div
+          class="frame ${width ? 'has-width' : ''} ${side ? '' : 'is-stacked'}"
+          style="${width ? `--figure-width: ${width}` : ''}">
+          <div class="layout is-${showLegend ? panel : 'none'}">
+            <div class="picture">
+              ${
+                this._failed
+                  ? html`<div class="missing">
+                      ${this._alt || 'The picture could not be loaded.'}
+                    </div>`
+                  : html`<img
+                      src="${this._src}"
+                      alt="${this._natural ? '' : this._alt}"
+                      @load="${this._onLoad}"
+                      @error="${() => (this._failed = true)}" />`
+              }
+              ${this._natural && !this._failed ? this._overlay() : null}
+            </div>
+            ${showLegend ? this._legend() : null}
           </div>
-          ${showLegend ? this._legend() : null}
         </div>
         ${this._errors()}
         ${this.caption ? html`<figcaption class="caption">${this.caption}</figcaption>` : null}

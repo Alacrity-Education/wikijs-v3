@@ -144,14 +144,19 @@ per thing. A shape with no id and no colour is `white`.
   image box with `preserveAspectRatio="none"`, so it stretches exactly as the picture does, whatever
   width the column gives it, and a photo measured on a preview lines up.
 - **Every default size is relative to the space width W**, so a 4000 px photo and an 800 px screenshot
-  come out alike: stroke `W/250`, halo twice that, disc radius `W/40`, disc text `W/50`, label text
-  `W/45`, pin radius `W/70`, triangle `W/60`. The block's `scale` prop multiplies all of them.
+  come out alike: stroke `W/250`, halo twice that, label text `W/45`, pin radius `W/70`, triangle
+  `W/60`. The block's `scale` prop multiplies all of them.
+- **A disc is sized by its id**, so a single digit fills it the way it fills a badge: radius `W/80` for
+  a one-character id, `W/60` for two, `W/40` for three or more; the id is drawn bold at `W/60` in
+  every case. A `label` beside a disc starts past that disc's own radius. The legend panel's discs are
+  CSS and are not affected.
 - **Two passes per stroke** — a wide dark stroke under the coloured one — and `paint-order: stroke`
   with a dark halo on every text, so an annotation reads on a light render, a dark photo, copper or
   silkscreen. The disc is a filled circle in the shape's colour with its id in near-black.
 - `dashed` is a dash array in multiples of the stroke width, so the dashes scale with it.
 - Shapes take pointer events; the SVG itself does not, so a reader can still right-click and save the
-  picture.
+  picture. With `interactive="false"` the shapes do not either: no shape or legend entry listens for
+  the pointer, focus or a tap, entries take no `tabindex`, and nothing is ever dimmed or highlighted.
 - The legend panel is **dark whatever the site theme** — `#121620`, text `#ebebeb` — like the panel the
   Pillow workflow extended the canvas with: the palette is chosen against dark, and yellow on white is
   not a label. Each entry carries the disc of its id and the entry's own HTML; the active entry gets a
@@ -160,8 +165,23 @@ per thing. A shape with no id and no colour is `white`.
   it when the block is narrower than about 640 px (a container query); `"below"` (the default) and
   `"above"` stack; `"none"` draws no panel, list or not.
 - The caption, when given, sits under everything, styled as other blocks style theirs.
-- The image is this block's own `<img>` in its shadow root, `width: 100%; height: auto`, so nothing
-  about the figure depends on the stylesheet of the page around it. The overlay is drawn only once the
+- **The figure's width** — the picture and a legend beside it, together — is the `width` prop when
+  it is given, otherwise the `width` attribute the renderer wrote on the image from markdown-it-imsize's
+  `=WxH` (`![alt](x.png =10%x10%)` arrives as `width="10%"`), otherwise the column. `60%` is a share
+  of the column and a bare number is pixels; an unparseable value is ignored. The image's `height` is
+  ignored: the aspect ratio is the picture's. What the width sizes depends on where the legend is:
+  - beside it (`right` / `left`), the **picture's column** only: the figure stays the width of the
+    column and the grid becomes `minmax(0, W) minmax(220px, 1fr)` (mirrored for `left`), so the legend
+    takes the rest of the row beside a smaller picture. The 640 px container query measures the
+    column, and below it the two stack as usual;
+  - stacked (`below` / `above` / `none`, or a block with no list), the **whole figure**, as `width`
+    with `max-width: 100%` and `min-width: min(100%, 240px)`, so a very small percentage still leaves a
+    legend that can be read under the picture.
+
+  With no width given, a stacked figure is capped at the picture's natural width so a small screenshot
+  is not blown up; with one, there is no cap. `align="center"` centres a narrower figure.
+- The image is this block's own `<img>` in its shadow root, `width: 100%; height: auto` of the
+  picture box, so nothing about the figure depends on the stylesheet of the page around it. The overlay is drawn only once the
   image has loaded and its natural size is known; an image that fails to load shows its `alt` in a
   dashed box and the parse errors, if any.
 - **Errors never blank the figure.** A line that does not parse is skipped and reported — line number
@@ -176,6 +196,8 @@ per thing. A shape with no id and no colour is `white`.
 | -- | -- | -- | -- |
 | `panel` | select `below` `right` `left` `above` `none` | `below` | where the legend goes |
 | `scale` | number | `1` | multiplies every default size of §3 |
+| `width` | string | | the figure's width: `60%` of the column, or `480` pixels; empty follows the image's own `width`, or the column |
+| `interactive` | boolean | `true` | whether pointing at a legend entry or a shape highlights the pair; `"false"` is read as off |
 | `caption` | string | | shown under the figure |
 | `align` | select `left` `center` | `left` | as every other figure block |
 
