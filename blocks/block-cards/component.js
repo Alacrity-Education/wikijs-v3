@@ -2,7 +2,7 @@ import { LitElement, html, css } from 'lit'
 
 /**
  * The narrowest a card is allowed to get before the row gives up a column, in pixels: room for a
- * medium picture and a few words beside it. Below that the cards wrap onto the next line instead.
+ * picture and a few words under it. Below that the cards wrap onto the next line instead.
  */
 const MIN_CARD_WIDTH = 200
 
@@ -30,27 +30,23 @@ export class BlockCardsElement extends LitElement {
   static definition = {
     block: 'cards',
     name: 'Cards',
-    description: 'A row of cards, up to four to a line, each with a title, a picture and text.',
+    description:
+      'A row of cards, up to four to a line, each with a title, a picture and text below it.',
     icon: 'module',
     template: `::block-card
 ## First project
 ![First project](/_assets/logo-wikijs.svg)
-What it is, in a line or two beside the picture.
-
----
-
-Anything longer goes below the line, across the whole card.
+What it is, in a few lines under the picture.
 ::
 
 ::block-card
 ## Second project
 ![Second project](/_assets/logo-wikijs.svg)
-What it is, in a line or two beside the picture.
+What it is, in a few lines under the picture.
 ::`,
     /*
       The same two cards in AsciiDoc. A section title cannot sit inside a delimited block, so the
-      card's title is a discrete heading; the line between the side text and the text below is
-      AsciiDoc's thematic break.
+      card's title is a discrete heading.
     */
     asciidocTemplate: `[block-card]
 --
@@ -59,11 +55,7 @@ What it is, in a line or two beside the picture.
 
 image::/_assets/logo-wikijs.svg[First project]
 
-What it is, in a line or two beside the picture.
-
-'''
-
-Anything longer goes below the line, across the whole card.
+What it is, in a few lines under the picture.
 --
 
 [block-card]
@@ -73,7 +65,7 @@ Anything longer goes below the line, across the whole card.
 
 image::/_assets/logo-wikijs.svg[Second project]
 
-What it is, in a line or two beside the picture.
+What it is, in a few lines under the picture.
 --`,
     props: [
       {

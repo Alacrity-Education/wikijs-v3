@@ -2063,8 +2063,8 @@
   }
 
   /*
-    Fork. Cards: what a `::block-card` holds, sorted by the card into a title, a picture, the text
-    beside it and the text below (`blocks/block-card`), which draws the outlined box around them.
+    Fork. Cards: what a `::block-card` holds, sorted by the card into a title, a picture and the
+    text under it (`blocks/block-card`), which draws the outlined box around them.
 
     Here rather than in the block for the reason `block-steps` gives: this is page content, and a
     document's own rules outrank a shadow root's `::slotted()` ones. The card marks the first and
@@ -2094,7 +2094,7 @@
       }
     }
 
-    /* -> The picture fills the column the card gives it, `pictureSize` wide */
+    /* -> The picture fills the width of the card */
     > [slot='picture'] {
       margin: 0;
 
