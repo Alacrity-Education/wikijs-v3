@@ -160,7 +160,19 @@ const isRoot = computed(() => {
   return Boolean(pageStore.id) && (pageStore.path === '' || pageStore.path === 'home')
 })
 
+/**
+ * Fork: whether the sidebar is showing a menu opened from a `menu` item -- a folder's, by its chevron
+ * or on the folder's landing page -- rather than the one this page resolves to. Edit Menu Items then
+ * edits THAT menu, the one the reader is looking at: editing the page's own instead (the root menu,
+ * for any top-level page) is what made every folder seem to open the root menu's editor. Whether the
+ * reader may is the server's to say, against the folder the menu belongs to.
+ */
+const editsOpenedMenu = computed(() => siteStore.nav.stack.length > 0)
+
 const canEditMenuItems = computed(() => {
+  if (editsOpenedMenu.value) {
+    return true
+  }
   /*
     Which menu the items belong to is the mode's answer, so which permission is needed follows it.
 
@@ -215,6 +227,17 @@ async function loadInheritedNav() {
 }
 
 function startEditing() {
+  if (editsOpenedMenu.value) {
+    siteStore.$patch({
+      overlay: 'NavEdit',
+      overlayOpts: {
+        openedNavId: siteStore.nav.currentId,
+        openedLabel: siteStore.nav.opener?.label ?? ''
+      }
+    })
+    props.menuHideHandler()
+    return
+  }
   siteStore.$patch({
     overlay: 'NavEdit',
     overlayOpts: {

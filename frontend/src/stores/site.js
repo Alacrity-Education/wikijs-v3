@@ -781,6 +781,24 @@ export const useSiteStore = defineStore('site', {
         console.warn(err.message)
       }
     },
+    /**
+     * Fork: read again the menu on screen that was opened from a `menu` item, after its items were
+     * saved, keeping the way back -- `refreshNavigation` leaves an opened menu alone on purpose, since
+     * it answers somebody ELSE changing it. Nothing to do once the sidebar has moved on.
+     */
+    async reloadOpenedNavigation(id) {
+      if (this.nav.currentId !== id) {
+        return
+      }
+      try {
+        const items = (await API_CLIENT.get(`sites/${this.id}/navigation/${id}`).json()) ?? []
+        if (this.nav.currentId === id) {
+          this.$patch({ nav: { items } })
+        }
+      } catch (err) {
+        console.warn(err.message)
+      }
+    },
     /** Go back to the menu the one on screen was opened from. */
     closeNavigationMenu() {
       const previous = this.nav.stack.at(-1)

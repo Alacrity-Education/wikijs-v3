@@ -3927,6 +3927,7 @@
   "navEdit.clearItems": "Clear All Items",
   "navEdit.editMenuItems": "Edit Menu Items",
   "navEdit.editingInherited": "Inherited menu — shared with every page using it",
+  "navEdit.editingOpenedMenu": "Menu of {label} — shared with every page under it",
   "navEdit.emptyMenuText": "Click the Add button to add your first menu item.",
   "navEdit.expandByDefault": "Expand by Default",
   "navEdit.expandByDefaultHint": "Whether the submenu is already expanded when the page loads.",

@@ -7,7 +7,10 @@
         Which menu is on screen, when it is not this page's own: an inherited menu is shared with every
         page that falls back to it, so a change here is not local to the page it was made from.
       -->
-      <span class="ml-3 text-caption opacity-80" v-if="isEditingInherited">
+      <span class="ml-3 text-caption opacity-80" v-if="openedNavId">
+        {{ t('navEdit.editingOpenedMenu', { label: openedLabel }) }}
+      </span>
+      <span class="ml-3 text-caption opacity-80" v-else-if="isEditingInherited">
         {{ t('navEdit.editingInherited') }}
       </span>
       <span class="ml-3 text-caption opacity-80" v-else-if="fromAdmin">
@@ -768,6 +771,13 @@ const fromAdmin = adminStore.overlay === 'NavEdit'
 
 /** The site the menu belongs to — the admin area's selected one, which need not be the one served. */
 const siteId = fromAdmin ? adminStore.overlayOpts.siteId : siteStore.id
+/*
+  Fork: a menu the sidebar opened from a `menu` item (a folder's), edited as itself -- by its id, as the
+  admin area edits one -- rather than as the menu this page resolves to. Read once: the sidebar may move
+  on while the editor is open, and the editor keeps editing what it was opened on.
+*/
+const openedNavId = fromAdmin ? null : (siteStore.overlayOpts.openedNavId ?? null)
+const openedLabel = fromAdmin ? '' : (siteStore.overlayOpts.openedLabel ?? '')
 
 // I18N
 
@@ -850,6 +860,10 @@ const navId = computed(() => {
   if (fromAdmin) {
     return adminStore.overlayOpts.navId
   }
+  // -> Fork: the menu the sidebar has open, which is not this page's at all -- see `NavEditMenu`
+  if (openedNavId) {
+    return openedNavId
+  }
   return (
     siteStore.overlayOpts.navId ??
     (pageStore.id && pageStore.isHome ? pageStore.navigationId : pageStore.navEntryId)
@@ -857,7 +871,9 @@ const navId = computed(() => {
 })
 
 /** Whether the menu on screen is an inherited one, which is shared with every page using it. */
-const isEditingInherited = computed(() => !fromAdmin && Boolean(siteStore.overlayOpts.navId))
+const isEditingInherited = computed(
+  () => !fromAdmin && !openedNavId && Boolean(siteStore.overlayOpts.navId)
+)
 
 /**
  * The locale of the menu being edited, which every menu a `menu` item opens has to share: a sidebar
@@ -1199,6 +1215,8 @@ async function save() {
 
     if (fromAdmin) {
       await saveFromAdmin(items)
+    } else if (openedNavId) {
+      await saveOpenedMenu(items)
     } else {
       await saveFromPage(items)
     }
@@ -1243,6 +1261,26 @@ async function saveFromPage(items) {
   })
   // -> Redraw the sidebar from what was just saved, rather than waiting for a navigation
   await siteStore.fetchNavigation(resp.navigationId ?? navId.value)
+  close()
+}
+
+/**
+ * Fork: saves the items of the menu the sidebar opened from a `menu` item, by its id -- no page's mode
+ * is involved, the menu belongs to the folder it was opened for. Redrawn in place afterwards, with the
+ * sidebar left where it is: the reader opened that menu to work in it.
+ */
+async function saveOpenedMenu(items) {
+  const resp = await API_CLIENT.put(`sites/${siteStore.id}/navigation/${openedNavId}`, {
+    json: { items }
+  }).json()
+  if (resp?.ok === false) {
+    throw new Error(resp.message || 'An unexpected error occured.')
+  }
+  notify({
+    type: 'positive',
+    message: t('navEdit.saveSuccess')
+  })
+  await siteStore.reloadOpenedNavigation(openedNavId)
   close()
 }
 

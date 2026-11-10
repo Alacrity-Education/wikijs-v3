@@ -599,13 +599,16 @@ async function routes(app: FastifyInstance) {
   app.put<{ Params: { siteId: string; navId: string }; Body: { items: NavigationItem[] } }>(
     '/sites/:siteId/navigation/:navId',
     {
-      config: {
-        permissions: ['manage:sites']
-      },
+      /*
+        No route-level `permissions`: besides `manage:sites` (the admin area's Navigation screen), the
+        sidebar's menu editor saves through here too when the menu on screen is not the page's own --
+        a folder's menu opened from its `menu` item (fork). That needs `manage:navigation` on the entry
+        the menu belongs to, which is a page rule, checked below as reading it in full is.
+      */
       schema: {
         summary: 'Replace the items of a navigation menu',
         description:
-          "Stores `items` as the whole of an existing menu, addressed by its own id — what the admin area's Navigation screen saves through. Unlike `navigation/pages/{pageId}`, no page's mode changes and nothing is repointed: it is the same menu, with different items.",
+          "Stores `items` as the whole of an existing menu, addressed by its own id — what the admin area's Navigation screen saves through, and the sidebar's editor for a menu opened from a `menu` item. Unlike `navigation/pages/{pageId}`, no page's mode changes and nothing is repointed: it is the same menu, with different items.\n\nNeeds `manage:sites`, or `manage:navigation` on the page or folder the menu belongs to — the home page for a locale's root menu. Without `manage:sites`, a `menu` item this save adds must point at a menu the requester may manage too.",
         tags: ['Navigation'],
         params: {
           type: 'object',
@@ -643,8 +646,31 @@ async function routes(app: FastifyInstance) {
         }
       }
     },
-    async (req) => {
-      await WIKI.models.navigation.setNavItems(req.params.siteId, req.params.navId, req.body.items)
+    async (req, reply) => {
+      const bySiteManager = mayManageSites(req)
+      if (!bySiteManager) {
+        const owner = await WIKI.models.navigation.refForNavId(req.params.siteId, req.params.navId)
+        if (
+          !owner ||
+          !mayOnPage(req, 'manage:navigation', { ...owner, siteId: req.params.siteId })
+        ) {
+          return reply.forbidden(
+            'Editing a menu requires the manage:navigation permission on the page it belongs to.'
+          )
+        }
+      }
+      await WIKI.models.navigation.setNavItems(
+        req.params.siteId,
+        req.params.navId,
+        req.body.items,
+        {
+          // -> A site manager may point anywhere, as the admin area always could; anybody else only at
+          //    menus they may manage, as the page-based save holds them to
+          mayPick: bySiteManager
+            ? undefined
+            : (target) => mayPickMenuTarget(req, req.params.siteId, target)
+        }
+      )
       await audit(req, 'admin', 'updateNavigation', {
         siteId: req.params.siteId,
         navigationId: req.params.navId,
