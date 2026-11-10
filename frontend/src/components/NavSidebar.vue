@@ -95,7 +95,11 @@
         <div v-else-if="item.type === `menu` && item.targetPage != null" class="sidebar-nav-split">
           <!-- -> `dense` on each: the list's own density reaches its direct rows only, and these two
                   sit in the split row's box -->
-          <w-item class="sidebar-nav-split__link" dense :to="pageHref(item.targetPage)">
+          <w-item
+            class="sidebar-nav-split__link"
+            dense
+            :to="pageHref(item.targetPage)"
+            @click="openFolderOfCurrentPage(item)">
             <w-item-section side><w-icon :name="item.icon" color="white" /></w-item-section>
             <w-item-section class="wrap-anywhere text-white">{{ item.label }}</w-item-section>
           </w-item>
@@ -247,6 +251,19 @@ function isCurrent(item) {
   const { to } = destination(item)
   // -> Decoded on both sides: either may be percent-encoded, depending on how it was arrived at
   return Boolean(to) && decodeUrlPath(router.resolve(to).path) === decodeUrlPath(route.path)
+}
+
+/**
+ * Fork: a `menu` item's link clicked while its page is the one being read. Following it goes nowhere --
+ * the router stays put, so nothing reloads and `showPageNavigation` is not asked again -- and what the
+ * reader wants from a folder's landing page is its folder, which loading the page would have opened
+ * (see `showPageNavigation`). So it is opened here instead. Any other click is the link's own.
+ */
+function openFolderOfCurrentPage(item) {
+  const target = router.resolve(pageHref(item.targetPage)).path
+  if (decodeUrlPath(target) === decodeUrlPath(route.path)) {
+    siteStore.openNavigationMenu(item.targetNavId, item)
+  }
 }
 
 /** ...and whether one of a group's children is, which is what opens the group. */
