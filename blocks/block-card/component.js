@@ -82,41 +82,56 @@ export class BlockCardElement extends LitElement {
 
   static get styles() {
     return css`
+      /*
+        The card is three rows of the row of cards it sits in -- title, pictures, text -- shared with
+        every other card on that line through a subgrid. So each band is as tall as the tallest of its
+        kind on the line: the titles line up, the text of every card starts at the same height, and a
+        picture shorter than its band is centred in it.
+
+        Hence the box is drawn on the host rather than on an element inside it: the three parts have
+        to be the host's own grid items for the subgrid to reach them. A browser without subgrid sizes
+        the three rows to this card alone, which is the card as it was before.
+      */
       :host {
         --card-border: #d6d9de;
         --card-bg: #fff;
-        display: block;
+        display: grid;
+        grid-row: span 3;
+        grid-template-rows: subgrid;
+        row-gap: 12px;
         min-width: 0;
+        /*
+          Important, because the host is an element of the page as well: the page's reset (Tailwind's
+          preflight) takes the border and padding off every element, and a document's own rules
+          outrank a shadow root's :host ones -- except against !important, where the shadow root wins.
+        */
+        box-sizing: border-box !important;
+        padding: 16px !important;
+        border: 1px solid var(--card-border) !important;
+        border-radius: 6px !important;
+        background-color: var(--card-bg) !important;
       }
       :host([dark]) {
         --card-border: rgba(255, 255, 255, 0.15);
         --card-bg: #1e232a;
       }
 
-      /* -> The height of the tallest card on the line, which the grid has given the host */
-      .card {
-        box-sizing: border-box;
-        height: 100%;
-        padding: 16px;
-        border: 1px solid var(--card-border);
-        border-radius: 6px;
-        background-color: var(--card-bg);
-      }
-
+      /* -> Placed by row, so a card missing a part leaves that band empty rather than moving up */
       .title {
-        margin-bottom: 12px;
+        grid-row: 1;
       }
 
       /*
         The whole width of the card, inside its padding, shared equally between the pictures when there
         are several: each slotted paragraph of them is a share. The images are sized to their share by
-        the page CSS, and several in ONE paragraph are spread across it by _layoutPictures.
+        the page CSS, and several in ONE paragraph are spread across it by _layoutPictures. Stretched to
+        the band's height, with the pictures centred in it.
       */
       .picture {
+        grid-row: 2;
         display: flex;
         align-items: center;
         gap: ${PICTURE_GAP}px;
-        margin-bottom: 12px;
       }
       ::slotted(*) {
         flex: 1 1 0;
@@ -124,6 +139,7 @@ export class BlockCardElement extends LitElement {
       }
 
       .text {
+        grid-row: 3;
         overflow-wrap: anywhere;
       }
 
@@ -258,11 +274,9 @@ export class BlockCardElement extends LitElement {
   render() {
     const { title, picture, text } = this._parts
     return html`
-      <div class="card">
-        <div class="title" ?hidden=${!title}><slot name="title"></slot></div>
-        <div class="picture" ?hidden=${!picture}><slot name="picture"></slot></div>
-        <div class="text" ?hidden=${!text}><slot></slot></div>
-      </div>
+      <div class="title" ?hidden=${!title}><slot name="title"></slot></div>
+      <div class="picture" ?hidden=${!picture}><slot name="picture"></slot></div>
+      <div class="text" ?hidden=${!text}><slot></slot></div>
     `
   }
 }
