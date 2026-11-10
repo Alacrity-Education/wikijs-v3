@@ -13,6 +13,9 @@ import {
   treeLabelSql
 } from '../helpers/common.ts'
 import { liveCondition } from '../helpers/publishing.ts'
+import type { RulePageRef } from '../helpers/pageRules.ts'
+import type { AccessActor } from './groups.ts'
+import { folderAccessKey } from './tree.ts'
 
 export const NAVIGATION_MODES = [
   'inherit',
@@ -167,11 +170,16 @@ class Navigation {
    *                   levels, unless `unfiltered` is set.
    * @param unfiltered Return every item regardless of visibility, which is what editing one needs —
    *                   an editor that could not see an item would drop it on the next save.
-   * @param hideAssetOnlyFolders For a reader: leave out the `menu` items opening the menu of a folder
-   *                   holding no page at any depth — files only — or, where the item also links to a
-   *                   page sharing the folder's path, keep the link and mark it `targetAssetOnly` so the
-   *                   sidebar draws no chevron into a menu that has nothing to list. Ignored with
-   *                   `unfiltered`: the editor is shown every item, so that it saves every item back.
+   * @param hideAssetOnlyFolders For a reader: also hide the `menu` items opening the menu of a folder
+   *                   holding no page at all — files only. Ignored with `unfiltered`, as is `actor`.
+   * @param actor      The reader, whose page rules decide which folders hold anything for them. A
+   *                   `menu` item opening a folder that holds pages, none of which this reader may
+   *                   open, is never shown: its name is all they would learn from it. Where the item
+   *                   also links to a page beside the folder that they may open, it stays as that link
+   *                   alone, marked `targetMenuHidden` so the sidebar draws no chevron into the menu.
+   *                   Without an actor, folders are not looked into, which is only right for a caller
+   *                   that is not answering a reader.
+   * @param unpublished Whether this reader may see pages that are not live, as `getPage` takes it.
    */
   async getNav(
     siteId: string,
@@ -180,11 +188,15 @@ class Navigation {
       userGroups = [],
       unfiltered = false,
       hideAssetOnlyFolders = false,
+      actor,
+      unpublished = false,
       mayOpenPage
     }: {
       userGroups?: string[]
       unfiltered?: boolean
       hideAssetOnlyFolders?: boolean
+      actor?: AccessActor
+      unpublished?: false | ((page: RulePageRef) => boolean)
       /**
        * Asked of the page a `showLink` menu item would link to: whether this reader may be sent there.
        * Without it no item links anywhere, which is the safe answer for a caller that has not said.
@@ -220,8 +232,12 @@ class Navigation {
       .filter((item) => isVisibleTo(item, userGroups))
       .filter((item) => item.type !== 'menu' || targets.has(item.targetNavId ?? ''))
     const pages = await this.targetPagesOf(siteId, visible, targets)
-    const assetOnly = hideAssetOnlyFolders
-      ? await this.assetOnlyFolders(siteId, visible, targets)
+    const hiddenMenus = actor
+      ? await this.hiddenFolderMenus(siteId, visible, targets, {
+          actor,
+          unpublished,
+          hideAssetOnlyFolders
+        })
       : new Set<string>()
     return visible.flatMap((item) => {
       if (item.type === 'menu') {
@@ -229,9 +245,9 @@ class Navigation {
         //    they may not know exists, for a link that could only answer them with a 404
         const page = pages.get(item.targetNavId ?? '')
         const targetPage = page && mayOpenPage?.(page) ? page.path : null
-        if (assetOnly.has(item.targetNavId ?? '')) {
-          // -> A folder of files alone has no menu worth opening: the page beside it, or nothing
-          return targetPage ? [{ ...item, targetPage, targetAssetOnly: true }] : []
+        if (hiddenMenus.has(item.targetNavId ?? '')) {
+          // -> A folder with nothing in it for this reader: the page beside it, or nothing at all
+          return targetPage ? [{ ...item, targetPage, targetMenuHidden: true }] : []
         }
         return [targetPage ? { ...item, targetPage } : item]
       }
@@ -244,18 +260,27 @@ class Navigation {
   }
 
   /**
-   * Of the menus the `menu` items of one menu open, the ids of those owned by a folder holding no
-   * page at any depth below it — a folder of uploaded files alone. A page SHARING the folder's path
-   * is beside it rather than in it, so it does not count: that is the case `getNav` keeps as a link.
+   * Of the menus the `menu` items of one menu open, the ids of those a reader is not to be offered:
+   * owned by a folder holding pages none of which they may open — and, with `hideAssetOnlyFolders`,
+   * by one holding no page at all, files only. A page SHARING the folder's path is beside it rather
+   * than in it, so it does not count: that is the case `getNav` keeps as a link.
    *
-   * Drafts and scheduled pages count as pages here. Whether a reader may see them is the page rules'
-   * question, asked where the folder is listed; this one is only whether the folder is a place pages
-   * are kept at all.
+   * Only folders: a menu owned by a page, or a locale's root menu, is the reader's to open whenever
+   * the item is.
    */
-  private async assetOnlyFolders(
+  private async hiddenFolderMenus(
     siteId: string,
     items: NavigationItem[],
-    targets: Map<string, NavigationOwner>
+    targets: Map<string, NavigationOwner>,
+    {
+      actor,
+      unpublished,
+      hideAssetOnlyFolders
+    }: {
+      actor: AccessActor
+      unpublished: false | ((page: RulePageRef) => boolean)
+      hideAssetOnlyFolders: boolean
+    }
   ): Promise<Set<string>> {
     const folders = new Map<string, NavigationOwner>()
     for (const item of items) {
@@ -264,27 +289,24 @@ class Navigation {
         folders.set(target.id, target)
       }
     }
-    const empty = new Set<string>()
-    await Promise.all(
-      [...folders.values()].map(async (folder) => {
-        const rows = await WIKI.db
-          .select({ id: treeTable.id })
-          .from(treeTable)
-          .where(
-            and(
-              eq(treeTable.siteId, siteId),
-              eq(treeTable.locale, folder.locale!),
-              eq(treeTable.type, 'page'),
-              sql`${treeTable.folderPath} <@ ${encodeTreePath(folder.path)}::ltree`
-            )
-          )
-          .limit(1)
-        if (rows.length < 1) {
-          empty.add(folder.id)
-        }
-      })
-    )
-    return empty
+    if (folders.size < 1) {
+      return new Set()
+    }
+    const access = await WIKI.models.tree.folderContentAccess({
+      siteId,
+      folders: [...folders.values()].map((f) => ({ locale: f.locale!, path: f.path! })),
+      actor,
+      kinds: ['page'],
+      unpublished
+    })
+    const hidden = new Set<string>()
+    for (const folder of folders.values()) {
+      const state = access.get(folderAccessKey(folder.locale!, folder.path!))
+      if (state === 'closed' || (state === 'empty' && hideAssetOnlyFolders)) {
+        hidden.add(folder.id)
+      }
+    }
+    return hidden
   }
 
   /**

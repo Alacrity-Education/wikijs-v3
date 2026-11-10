@@ -64,11 +64,12 @@
           <w-item-section class="wrap-anywhere text-white">{{ item.label }}</w-item-section>
         </w-item>
         <!--
-          A menu item opening a folder of files alone, kept for the page sharing its path: the server
-          sends one only where there is such a page (`targetAssetOnly`), and the empty menu gets no way in.
+          A menu item opening a folder that holds nothing for this reader -- files alone, or pages they
+          may not open -- kept for the page sharing its path: the server sends one only where there is
+          such a page (`targetMenuHidden`), and the menu gets no way in.
         -->
         <w-item
-          v-else-if="item.type === `menu` && item.targetAssetOnly && item.targetPage != null"
+          v-else-if="item.type === `menu` && item.targetMenuHidden && item.targetPage != null"
           :to="pageHref(item.targetPage)">
           <w-item-section side><w-icon :name="item.icon" color="white" /></w-item-section>
           <w-item-section class="wrap-anywhere text-white">{{ item.label }}</w-item-section>

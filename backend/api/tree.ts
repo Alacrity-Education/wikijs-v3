@@ -1,5 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { TREE_ORDER_BY, type TreeItemType, type TreeOrderBy, type TreeRow } from '../models/tree.ts'
+import {
+  folderAccessKey,
+  TREE_ORDER_BY,
+  type TreeItemType,
+  type TreeOrderBy,
+  type TreeRow
+} from '../models/tree.ts'
 import { audit } from '../helpers/audit.ts'
 import { requestUserId } from '../helpers/requester.ts'
 import {
@@ -121,22 +127,47 @@ type SiteRequest = FastifyRequest<{ Params: { siteId: string } }>
  * a reader opening it finds it empty. Hiding those would mean resolving every descendant of every
  * folder on every listing, which is not worth what it costs.
  */
-function visibleTreeItems<T extends { type?: string; folderPath?: string; fileName?: string }>(
-  req: SiteRequest,
-  items: T[]
-): T[] {
+async function visibleTreeItems<
+  T extends { type?: string; folderPath?: string; fileName?: string }
+>(req: SiteRequest, items: T[]): Promise<T[]> {
   const actor = WIKI.models.groups.actorForRequest(req)
-  return items.filter((item) => {
-    const path = item.folderPath ? `${item.folderPath}/${item.fileName}` : (item.fileName ?? '')
+  const pathOf = (item: T) =>
+    item.folderPath ? `${item.folderPath}/${item.fileName}` : (item.fileName ?? '')
+  const localeOf = (item: T) => (item as { locale?: string }).locale ?? ''
+  const allowed = items.filter((item) => {
     const permission = item.type === 'asset' ? 'read:assets' : 'read:pages'
     return WIKI.models.groups.checkAccess(actor, permission, {
       siteId: req.params.siteId,
-      path,
+      path: pathOf(item),
       // -> A rule may be limited to a locale, and a feedback board belongs to one (`ruleRefFor`)
-      locale: (item as { locale?: string }).locale,
+      locale: localeOf(item),
       tags: (item as any).tags ?? []
     })
   })
+  /*
+    A folder the rule over its path leaves open can still hold nothing this requester may open --
+    every page under it closed by a rule further down or by its tags, every file by `read:assets` --
+    and then its name is all they would learn from it, so it is left out too. Pages and files both
+    count here, since this listing is the file manager's as well as the page pickers'. A folder
+    holding nothing at all is still shown to whoever the rule lets see it: it is somewhere they may be
+    about to put something.
+  */
+  const folders = allowed.filter((item) => item.type === 'folder')
+  if (folders.length < 1) {
+    return allowed
+  }
+  const access = await WIKI.models.tree.folderContentAccess({
+    siteId: req.params.siteId,
+    folders: folders.map((item) => ({ locale: localeOf(item), path: pathOf(item) })),
+    actor,
+    kinds: ['page', 'asset'],
+    unpublished: unpublishedFor(req)
+  })
+  return allowed.filter(
+    (item) =>
+      item.type !== 'folder' ||
+      access.get(folderAccessKey(localeOf(item), pathOf(item))) !== 'closed'
+  )
 }
 
 /** A folder's own slash-separated path, which is what a rule over that branch addresses. */
@@ -402,7 +433,7 @@ async function routes(app: FastifyInstance) {
         // -> A page that is not live is listed only for whoever may edit it, as the page view decides
         unpublished: unpublishedFor(req)
       })
-      return visibleTreeItems(req, items)
+      return await visibleTreeItems(req, items)
     }
   )
 
@@ -537,34 +568,52 @@ async function routes(app: FastifyInstance) {
       if (!features?.browse && !features?.listFolderChildren) {
         return reply.forbidden('Browsing is disabled on this site.')
       }
+      const locale = req.query.locale ?? defaultLocale(req.params.siteId)
+      const unpublished = unpublishedFor(req)
       const level = await WIKI.models.tree.browse({
         siteId: req.params.siteId,
         path: req.query.path,
-        locale: req.query.locale ?? defaultLocale(req.params.siteId),
-        unpublished: unpublishedFor(req)
+        locale,
+        unpublished
       })
       if (!level) {
         return reply.notFound('This folder does not exist.')
       }
       /*
         A browse row carries a whole path rather than a folder/name pair, and stands for a page, a
-        folder, or both at once. Judged on that path either way: for the page it IS the page, and for
-        a folder it is the branch, which is what a rule over the branch is talking about.
+        folder, or both at once — and each half is judged on its own.
 
-        With the locale being listed and the row's own tags, both of which a rule may be written
-        against — a row that is only a folder carries no tags, so a tag rule never hides one.
+        The page on its path, with the locale being listed and the page's own tags, both of which a
+        rule may be written against.
+
+        The folder on its path as the branch a rule over it talks about, AND on what it holds: a
+        folder whose pages are all closed to this requester — by a rule deeper down, a tag rule, or
+        their state — is not shown, since its name would be all they could learn from it. A row that
+        was both keeps whichever half survives.
       */
       const actor = WIKI.models.groups.actorForRequest(req)
+      const folderAccess = await WIKI.models.tree.folderContentAccess({
+        siteId: req.params.siteId,
+        folders: level.items
+          .filter((item) => item.isFolder)
+          .map((item) => ({ locale, path: item.path })),
+        actor,
+        kinds: ['page'],
+        unpublished
+      })
       return {
         ...level,
-        items: level.items.filter((item) =>
-          WIKI.models.groups.checkAccess(actor, 'read:pages', {
-            siteId: req.params.siteId,
-            path: item.path,
-            locale: req.query.locale ?? defaultLocale(req.params.siteId),
-            tags: item.tags
-          })
-        )
+        items: level.items.flatMap((item) => {
+          const ref = { siteId: req.params.siteId, path: item.path, locale }
+          const isPage =
+            item.isPage &&
+            WIKI.models.groups.checkAccess(actor, 'read:pages', { ...ref, tags: item.tags })
+          const isFolder =
+            item.isFolder &&
+            WIKI.models.groups.checkAccess(actor, 'read:pages', { ...ref, tags: [] }) &&
+            folderAccess.get(folderAccessKey(locale, item.path)) === 'open'
+          return isPage || isFolder ? [{ ...item, isPage, isFolder }] : []
+        })
       }
     }
   )

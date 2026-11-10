@@ -317,6 +317,18 @@ function pageIsVisible(
 /** Whether a page that is not live may be listed: `getPage`'s `unpublished`, minus the `true`. */
 type Unpublished = false | ((page: RulePageRef) => boolean)
 
+/**
+ * What a folder holds, as far as one requester is concerned — see `tree.folderContentAccess`:
+ * nothing of the kinds asked about (`empty`), something but none of it theirs to open (`closed`), or at
+ * least one entry they may open (`open`).
+ */
+export type FolderContentAccess = 'empty' | 'closed' | 'open'
+
+/** How `folderContentAccess` keys its answer: one folder of one locale. */
+export function folderAccessKey(locale: string, path: string): string {
+  return `${locale}\u0000${path}`
+}
+
 /** The half of `pageIsVisible` that has to be asked of each row once it is read. */
 function isListable(unpublished: Unpublished, isLive: boolean, page: RulePageRef): boolean {
   return isLive || (unpublished !== false && unpublished(page))
@@ -566,6 +578,113 @@ class Tree {
         ? [page]
         : []
     })
+  }
+
+  /**
+   * Whether each of some folders holds anything this requester may open, at any depth below it.
+   *
+   * A folder has no permissions of its own, and a rule over its path says what governs the branch —
+   * but not whether the branch holds anything the requester may actually reach: a DENY written for
+   * every page under it, a tag rule closing each one, or nothing but drafts leaves a folder whose
+   * name is all a reader would ever learn from it. Listings ask this so that such a folder is not
+   * shown to somebody who could open nothing inside it.
+   *
+   * A page counts when `read:pages` allows it, at its own path and with its own tags, and it is live
+   * or `unpublished` lets this requester see it as it is — the page view's own answer. An asset counts
+   * when `read:assets` allows it. Hidden pages (`isBrowsable` off) count: they are not listed, but
+   * they can be read, and the folder is where they live.
+   *
+   * One query for every folder asked about, of the entries under any of them; the rules are then
+   * asked of each entry in turn until every folder has its answer, so a folder holding something
+   * readable early in the list costs one check.
+   *
+   * @param kinds Which entries count. A sidebar or a browse menu leads to pages, so it asks about
+   *              pages only; a file listing asks about assets too.
+   * @returns By `folderAccessKey(locale, path)`, for every folder asked about.
+   */
+  async folderContentAccess({
+    siteId,
+    folders,
+    actor,
+    kinds,
+    unpublished = false
+  }: {
+    siteId: string
+    folders: { locale: string; path: string }[]
+    actor: AccessActor
+    kinds: ('page' | 'asset')[]
+    unpublished?: Unpublished
+  }): Promise<Map<string, FolderContentAccess>> {
+    const answer = new Map<string, FolderContentAccess>()
+    const wanted = folders.filter((f) => f.path)
+    for (const folder of wanted) {
+      answer.set(folderAccessKey(folder.locale, folder.path), 'empty')
+    }
+    if (wanted.length < 1 || kinds.length < 1) {
+      return answer
+    }
+    const encoded = [...new Set(wanted.map((f) => encodeTreePath(f.path)))]
+    const rows = await WIKI.db
+      .select({
+        type: treeTable.type,
+        locale: treeTable.locale,
+        folderPath: treeTable.folderPath,
+        fileName: treeTable.fileName,
+        tags: treeTable.tags,
+        isLive: sql<boolean>`${liveCondition(pagesTable)}`.mapWith(Boolean)
+      })
+      .from(treeTable)
+      .leftJoin(pagesTable, eq(pagesTable.id, treeTable.id))
+      .where(
+        and(
+          eq(treeTable.siteId, siteId),
+          inArray(treeTable.type, kinds),
+          inArray(treeTable.locale, [...new Set(wanted.map((f) => f.locale))]),
+          sql`${treeTable.folderPath} <@ ARRAY[${sql.join(
+            encoded.map((p) => sql`${p}::ltree`),
+            sql`, `
+          )}]`
+        )
+      )
+
+    let undecided = wanted.length
+    for (const row of rows) {
+      if (undecided < 1) {
+        break
+      }
+      const parent = decodeTreePath(row.folderPath)
+      // -> The folders this entry is under: its own parent and every ancestor of it asked about
+      const holders = wanted.filter(
+        (f) => f.locale === row.locale && (parent === f.path || parent.startsWith(`${f.path}/`))
+      )
+      const pending = holders.filter(
+        (f) => answer.get(folderAccessKey(f.locale, f.path)) !== 'open'
+      )
+      if (pending.length < 1) {
+        continue
+      }
+      const ref = {
+        siteId,
+        locale: row.locale,
+        path: parent ? `${parent}/${row.fileName}` : row.fileName,
+        tags: (row.tags ?? []) as string[]
+      }
+      const opens =
+        row.type === 'asset'
+          ? WIKI.models.groups.checkAccess(actor, 'read:assets', { ...ref, tags: [] })
+          : WIKI.models.groups.checkAccess(actor, 'read:pages', ref) &&
+            isListable(unpublished, row.isLive, ref)
+      for (const folder of pending) {
+        const key = folderAccessKey(folder.locale, folder.path)
+        if (opens) {
+          answer.set(key, 'open')
+          undecided--
+        } else if (answer.get(key) === 'empty') {
+          answer.set(key, 'closed')
+        }
+      }
+    }
+    return answer
   }
 
   /**
