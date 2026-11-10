@@ -1,55 +1,70 @@
 <template>
   <!--
-    FORK-ONLY. The page's own actions -- properties, history, source, the "..." menu, duplicate, rename,
-    delete -- as labelled full-width rows for the stacked page layout's side column
-    (`StackedSidebarActions.vue`), in place of the icon rail the classic layout draws down the far edge
-    of the page.
+    FORK-ONLY. The page's own actions -- properties, history, source, convert, rerender, duplicate,
+    rename, delete -- for the stacked page layout's side column (`StackedSidebarActions.vue`), in place
+    of the icon rail the classic layout draws down the far edge of the page. Drawn in two parts, which
+    the column puts in two places:
+
+    - `primary`: Properties, a labelled full-width button styled as Edit is beside it -- plus, while a
+      suggestion or a new page is being written, the line saying so.
+    - `icons`: everything else as icon-only buttons, each named by its tooltip and its `aria-label`,
+      flowing into the column's icon grid (this part's root is `display: contents`). What the rail
+      keeps behind its "..." menu -- convert, rerender -- is inline here, there being room for it.
 
     THIS MIRRORS `PageActionsCol.vue`, BY HAND. That file is upstream's and is left untouched so that it
     merges cleanly, so its buttons -- in the same order, behind the same gates, running the same
-    handlers -- are written out again here with only their shape changed: none of the rail's geometry
-    (no fixed width, no square buttons, no editor-orange background), the groups split by horizontal
-    rules, and the tooltips gone since the name is on the button. Whenever upstream changes the rail or
-    its handlers, bring the change over. Already here, for instance: `canDuplicate`, which asks for
-    source access here and `write:pages` somewhere on the site rather than `write:pages` on this page.
+    handlers -- are written out again here with only their shape changed. Whenever upstream changes the
+    rail or its handlers, bring the change over. Already here, for instance: `canDuplicate`, which asks
+    for source access here and `write:pages` somewhere on the site rather than `write:pages` on this
+    page.
   -->
   <div
-    class="page-actions-list flex flex-col items-stretch"
+    v-if="part === `primary`"
+    class="page-actions-list is-primary"
     :class="editorStore.isActive ? `is-editor` : ``">
+    <!-- -> Disabled, not hidden, for a redirection: see the rail -->
+    <w-btn
+      v-if="userStore.can(`write:pages`)"
+      class="acrylic-btn"
+      flat
+      no-caps
+      icon="la:pen-nib"
+      color="deep-orange-9"
+      :label="t('common.actions.properties')"
+      :disable="isRedirect"
+      @click="togglePageProperties" />
+    <span
+      v-if="editorStore.isActive && [`create`, `suggest`].includes(editorStore.mode)"
+      class="page-actions-list-mode text-caption"
+      >{{
+        editorStore.mode === `suggest`
+          ? t('common.actions.suggestedEdit')
+          : t('common.actions.newPage')
+      }}</span
+    >
+  </div>
+  <div v-else class="page-actions-list is-icons">
     <template v-if="userStore.can(`write:pages`)">
-      <!-- -> Disabled, not hidden, for a redirection: see the rail -->
-      <w-btn
-        flat
-        dense
-        no-caps
-        icon="la:pen-nib"
-        color="deep-orange-9"
-        :label="t('common.actions.properties')"
-        :disable="isRedirect"
-        @click="togglePageProperties" />
       <w-btn
         v-if="flagsStore.experimental"
         flat
-        dense
-        no-caps
         icon="la:project-diagram"
         color="grey-7"
-        :label="t('editor.pageData.title')"
-        @click="togglePageData"
-        disable />
+        :aria-label="t('editor.pageData.title')"
+        disable
+        @click="togglePageData">
+        <w-tooltip>{{ t('editor.pageData.title') }}</w-tooltip>
+      </w-btn>
       <w-btn
         v-if="editorStore.isActive && !isRedirect"
         flat
-        dense
-        no-caps
         icon="mdi:image-sync-outline"
         :color="hasPendingAssets ? `deep-orange-9` : `grey-7`"
-        label="Pending Asset Uploads">
-        <template #append>
-          <strong v-if="hasPendingAssets" class="page-actions-list-count">{{
-            editorStore.pendingAssets.length
-          }}</strong>
-        </template>
+        aria-label="Pending Asset Uploads">
+        <w-badge v-if="hasPendingAssets" color="deep-orange-9" text-color="white" rounded floating>
+          <strong>{{ editorStore.pendingAssets.length }}</strong>
+        </w-badge>
+        <w-tooltip>Pending Asset Uploads</w-tooltip>
         <w-menu ref="menuPendingAssets" anchor="top left" self="top right" :offset="[10, 0]">
           <w-card style="width: 450px; max-width: 90vw">
             <w-card-section class="card-header">
@@ -84,107 +99,85 @@
           </w-card>
         </w-menu>
       </w-btn>
-      <w-separator class="my-2" v-if="showHistory || showSource || showPageActions" />
     </template>
     <w-btn
       v-if="showHistory"
       flat
-      dense
-      no-caps
       icon="la:history"
       color="grey-7"
-      :label="t('history.title')"
-      @click="viewPageHistory" />
+      :aria-label="t('history.title')"
+      @click="viewPageHistory">
+      <w-tooltip>{{ t('history.title') }}</w-tooltip>
+    </w-btn>
     <w-btn
       v-if="showSource"
       flat
-      dense
-      no-caps
       icon="la:code"
       color="grey-7"
-      :label="t('pageSource.title')"
-      @click="viewPageSource" />
+      :aria-label="t('pageSource.title')"
+      @click="viewPageSource">
+      <w-tooltip>{{ t('pageSource.title') }}</w-tooltip>
+    </w-btn>
+    <!-- -> What the rail keeps in its "..." menu, inline: same gates, see `showPageActions` -->
     <template v-if="showPageActions">
-      <w-separator class="my-2" v-if="showHistory || showSource" />
       <w-btn
+        v-if="userStore.can(`write:pages`) && canConvert"
         flat
-        dense
-        no-caps
-        icon="la:ellipsis-h"
+        icon="la:atom"
         color="grey-7"
-        :label="t('common.header.pageActions')">
-        <w-menu
-          class="translucent-menu"
-          anchor="top left"
-          self="top right"
-          auto-close
-          transition-show="jump-left">
-          <w-list padding style="min-width: 225px">
-            <w-item
-              clickable
-              v-if="userStore.can(`write:pages`) && canConvert"
-              @click="convertPage">
-              <w-item-section class="items-center" avatar>
-                <w-icon class="text-deep-orange-9" name="la:atom" size="sm" />
-              </w-item-section>
-              <w-item-section
-                ><w-item-label>{{ t('convertPage.action') }}</w-item-label></w-item-section
-              >
-            </w-item>
-            <w-item clickable v-if="userStore.can(`write:pages`) && hasBody" @click="rerenderPage">
-              <w-item-section class="items-center" avatar>
-                <w-icon class="text-deep-orange-9" name="la:magic" size="sm" />
-              </w-item-section>
-              <w-item-section><w-item-label>Rerender Page</w-item-label></w-item-section>
-            </w-item>
-            <w-item clickable disabled v-if="flagsStore.experimental">
-              <w-item-section class="items-center" avatar>
-                <w-icon class="text-deep-orange-9" name="la:sun" size="sm" />
-              </w-item-section>
-              <w-item-section><w-item-label>View Backlinks</w-item-label></w-item-section>
-            </w-item>
-          </w-list>
-        </w-menu>
+        :aria-label="t('convertPage.action')"
+        @click="convertPage">
+        <w-tooltip>{{ t('convertPage.action') }}</w-tooltip>
+      </w-btn>
+      <w-btn
+        v-if="userStore.can(`write:pages`) && hasBody"
+        flat
+        icon="la:magic"
+        color="grey-7"
+        aria-label="Rerender Page"
+        @click="rerenderPage">
+        <w-tooltip>Rerender Page</w-tooltip>
+      </w-btn>
+      <w-btn
+        v-if="flagsStore.experimental"
+        flat
+        icon="la:sun"
+        color="grey-7"
+        aria-label="View Backlinks"
+        disable>
+        <w-tooltip>View Backlinks</w-tooltip>
       </w-btn>
     </template>
     <!-- -> Hidden outright while a suggestion is being written: see the rail -->
     <template v-if="!(editorStore.isActive && [`create`, `suggest`].includes(editorStore.mode))">
-      <w-separator
-        class="my-2"
-        v-if="canDuplicate || userStore.can(`manage:pages`) || userStore.can(`delete:pages`)" />
       <w-btn
         v-if="canDuplicate"
         flat
-        dense
-        no-caps
         icon="la:copy"
         color="grey-7"
-        :label="t('common.actions.duplicate')"
-        @click="duplicatePage" />
+        :aria-label="t('common.actions.duplicate')"
+        @click="duplicatePage">
+        <w-tooltip>{{ t('common.actions.duplicate') }}</w-tooltip>
+      </w-btn>
       <w-btn
         v-if="userStore.can(`manage:pages`)"
         flat
-        dense
-        no-caps
         icon="la:share"
         color="grey-7"
-        :label="`${t('common.actions.rename')} / ${t('common.actions.move')}`"
-        @click="renamePage" />
+        :aria-label="renameLabel"
+        @click="renamePage">
+        <w-tooltip>{{ renameLabel }}</w-tooltip>
+      </w-btn>
       <w-btn
         v-if="userStore.can(`delete:pages`)"
         flat
-        dense
-        no-caps
         icon="la:trash"
         color="grey-7"
-        :label="t('common.page.delete')"
-        @click="deletePage" />
+        :aria-label="t('common.page.delete')"
+        @click="deletePage">
+        <w-tooltip>{{ t('common.page.delete') }}</w-tooltip>
+      </w-btn>
     </template>
-    <span class="page-actions-list-mode text-caption" v-else>{{
-      editorStore.mode === `suggest`
-        ? t('common.actions.suggestedEdit')
-        : t('common.actions.newPage')
-    }}</span>
   </div>
 </template>
 
@@ -196,6 +189,7 @@ import { useI18n } from 'vue-i18n'
 import { dialog } from '@/composables/dialog'
 import { notify } from '@/composables/notify'
 import { notifyRelinked } from '@/helpers/pageRelink'
+import { pageDeleteLanding } from '@/helpers/pageDeleteLanding'
 
 import { useEditorStore } from '@/stores/editor'
 import { useFlagsStore } from '@/stores/flags'
@@ -208,6 +202,17 @@ import { useUserStore } from '@/stores/user'
   handler below is that file's, under the same name; only the pending-assets menu ref is this list's
   own.
 */
+
+// PROPS
+
+defineProps({
+  /** Which half to draw: Properties (`primary`) or the icon buttons (`icons`). See the template. */
+  part: {
+    type: String,
+    default: 'icons',
+    validator: (value) => ['primary', 'icons'].includes(value)
+  }
+})
 
 // STORES
 
@@ -230,6 +235,8 @@ const { t } = useI18n()
 const menuPendingAssets = ref(null)
 
 // COMPUTED
+
+const renameLabel = computed(() => `${t('common.actions.rename')} / ${t('common.actions.move')}`)
 
 const hasPendingAssets = computed(() => editorStore.pendingAssets?.length > 0)
 
@@ -420,14 +427,22 @@ function renamePage() {
 }
 
 function deletePage() {
+  // -> Captured before the dialog opens: once the page is gone, the store may already be moving on
+  const deleted = {
+    siteId: siteStore.id,
+    locale: pageStore.locale,
+    path: pageStore.path,
+    localePrefix: siteStore.localeUrlPrefix(pageStore.locale)
+  }
   dialog({
     component: defineAsyncComponent(() => import('@/components/PageDeleteDialog.vue')),
     componentProps: {
       pageId: pageStore.id,
       pageName: pageStore.title
     }
-  }).onOk(() => {
-    router.replace('/')
+  }).onOk(async () => {
+    // -> Fork: another page of the same folder rather than the home page (`helpers/pageDeleteLanding.js`)
+    router.replace(await pageDeleteLanding(deleted))
   })
 }
 
@@ -441,23 +456,28 @@ function removePendingAsset(item) {
 </script>
 
 <style lang="scss">
-/* The labelled list in the side column: rows as wide as the column, icon and label from the left */
-.page-actions-list {
+/* Properties, shaped as Edit is beside it: as wide as the column, icon and label from the start edge */
+.page-actions-list.is-primary {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+
   .w-btn {
     width: 100%;
     justify-content: flex-start;
-    padding-inline: 1rem;
+    text-align: start;
   }
+}
 
-  &-count {
-    margin-inline-start: auto;
-    color: $deep-orange-9;
-  }
+/* The icon buttons belong to the column's grid (`StackedSidebarActions.vue`), not to a box of their own */
+.page-actions-list.is-icons {
+  display: contents;
+}
 
-  &-mode {
-    padding: 0.5rem 1rem;
-    color: $deep-orange-9;
-    font-weight: 500;
-  }
+.page-actions-list-mode {
+  padding: 0.5rem 1rem;
+  color: $deep-orange-9;
+  font-weight: 500;
 }
 </style>

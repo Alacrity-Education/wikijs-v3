@@ -1,26 +1,21 @@
 <template>
   <!--
-    FORK-ONLY. The foot of the side column under the stacked layout, which has no icon rail and no
-    buttons in the header row: both live here, as one labelled list under one heading
-    (`actionsInSidebar`, `composables/stackedLayout.js`). Reader buttons first, as they sit in the
-    header in the classic layout, then the page's own actions. Then, where the page has a discussion
-    under its article, what the Talk view's column offers in the classic layout -- there being no such
-    view -- with the same classes, so `_page-chrome.scss` lays the buttons out the same.
+    FORK-ONLY. The stacked layout's own sections of the side column, which has no icon rail and no
+    buttons in the header row (`actionsInSidebar`, `composables/stackedLayout.js`). Drawn after the
+    contents and the tags and before the rating and the last editor (`Index.vue`), in this order:
+
+    - Comments, where the page has a discussion under its article: what the Talk view's column offers
+      in the classic layout -- there being no such view -- with the same classes, so `_page-chrome.scss`
+      lays the buttons out the same.
+    - Page actions: the two things a page is mostly opened in the side column for -- Edit (or Suggest
+      edits) and Properties -- as labelled buttons as wide as the column, then everything else as a
+      grid of icon-only buttons named by their tooltips, five to a row.
 
     The buttons act on state the page holds -- the discussion, the annotator, the panel this column is
     on a phone -- so they ask the page rather than reaching for it.
   -->
-  <w-separator v-if="hasSections" />
-  <div class="p-4 flex items-center">
-    <w-icon class="me-2" name="la:cog" color="grey" />
-    <div class="text-caption text-grey-7">{{ t('common.header.pageActions') }}</div>
-  </div>
-  <div class="p-2">
-    <page-reader-actions v-if="!editorStore.isActive" />
-    <page-actions-list v-if="!pageStore.notFound" />
-  </div>
   <template v-if="talk">
-    <w-separator />
+    <w-separator v-if="hasSections" />
     <div class="p-4 flex items-center">
       <w-icon class="me-2" name="la:comments" color="grey" />
       <div class="text-caption text-grey-7">{{ t('common.comments.commentsTitle') }}</div>
@@ -71,6 +66,21 @@
       </w-btn>
     </div>
   </template>
+  <w-separator v-if="hasSections || talk" />
+  <div class="p-4 flex items-center">
+    <w-icon class="me-2" name="la:cog" color="grey" />
+    <div class="text-caption text-grey-7">{{ t('common.header.pageActions') }}</div>
+  </div>
+  <div class="stacked-page-actions px-4 pb-4">
+    <page-reader-actions v-if="!editorStore.isActive" part="primary" />
+    <page-actions-list v-if="!pageStore.notFound" part="primary" />
+    <!-- -> Both lists' icons in one grid, the page's own first: each list's icon part is
+            `display: contents`, so its buttons are this grid's cells -->
+    <div class="stacked-page-actions-icons">
+      <page-actions-list v-if="!pageStore.notFound" part="icons" />
+      <page-reader-actions v-if="!editorStore.isActive" part="icons" />
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -85,7 +95,7 @@ import PageActionsList from '@/components/stacked/PageActionsList.vue'
 import PageReaderActions from '@/components/stacked/PageReaderActions.vue'
 
 defineProps({
-  /** Whether any of the column's own sections -- contents, tags, rating, last editor -- is above. */
+  /** Whether any of the column's own sections is above this one: the contents or the tags. */
   hasSections: {
     type: Boolean,
     default: false
@@ -119,3 +129,38 @@ const dark = useDark()
 
 const { t } = useI18n()
 </script>
+
+<style lang="scss">
+.stacked-page-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* -> Set apart from the labelled buttons above it, where there are any: a reader may have none */
+.stacked-page-actions > :not(:empty) ~ .stacked-page-actions-icons {
+  margin-top: 0.5rem;
+}
+
+/*
+  Five to a row in the 300px column: wide enough for a finger, and a row of five reads as a toolbar
+  rather than a list. Each button fills its cell, so the hover tint is a tile rather than a circle
+  around the glyph.
+*/
+.stacked-page-actions-icons {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
+
+  /* -> The two lists' wrappers are always there, so `:empty` would never hold: no button, no grid */
+  &:not(:has(.w-btn)) {
+    display: none;
+  }
+
+  /* -> A list's own wrapper is `display: contents`, so the grid's cells are one level further down */
+  > * > .w-btn {
+    width: 100%;
+    min-height: 2.5rem;
+  }
+}
+</style>

@@ -597,8 +597,19 @@
               <page-tags class="mt-2" :edit="state.tagEditMode" />
             </div>
           </template>
+          <!-- -> Stacked layout: the discussion's buttons and the page's actions, in place of the rail
+                  and the header's row -- after the contents and tags, before the rating -->
+          <stacked-sidebar-actions
+            v-if="actionsInSidebar"
+            :has-sections="showToc || showTags"
+            :talk="showStackedTalk"
+            :talk-view="talkView"
+            :show-annotations="state.showAnnotations"
+            @new-comment="startNewComment"
+            @new-annotation="startAnnotating"
+            @toggle-annotations="toggleAllAnnotations" />
           <template v-if="showRatings">
-            <w-separator v-if="showToc || showTags" />
+            <w-separator v-if="showToc || showTags || actionsInSidebar" />
             <!-- Rating -->
             <div class="p-4 flex items-center">
               <w-icon class="me-2" name="la:star-half-alt" color="grey" />
@@ -650,7 +661,7 @@
           </template>
           <!-- Last Edited By -->
           <template v-if="showLastEditedBy">
-            <w-separator v-if="showToc || showTags || showRatings" />
+            <w-separator v-if="showToc || showTags || showRatings || actionsInSidebar" />
             <div class="p-4 flex items-center">
               <w-icon class="me-2" name="la:user-edit" color="grey" />
               <div class="text-caption text-grey-7">{{ t('common.page.lastEditedBy') }}</div>
@@ -677,16 +688,6 @@
               </router-link>
             </div>
           </template>
-          <!-- -> Stacked layout: the page's actions, in place of the rail and the header's row -->
-          <stacked-sidebar-actions
-            v-if="actionsInSidebar"
-            :has-sections="showToc || showTags || showRatings || showLastEditedBy"
-            :talk="showStackedTalk"
-            :talk-view="talkView"
-            :show-annotations="state.showAnnotations"
-            @new-comment="startNewComment"
-            @new-annotation="startAnnotating"
-            @toggle-annotations="toggleAllAnnotations" />
         </template>
       </div>
       <!-- -> Every action on it acts on a page: there is none here to edit, share, rate or delete.

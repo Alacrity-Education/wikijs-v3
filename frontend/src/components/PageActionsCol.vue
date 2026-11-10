@@ -254,6 +254,7 @@ import { useI18n } from 'vue-i18n'
 import { dialog } from '@/composables/dialog'
 import { notify } from '@/composables/notify'
 import { notifyRelinked } from '@/helpers/pageRelink'
+import { pageDeleteLanding } from '@/helpers/pageDeleteLanding'
 
 import { useEditorStore } from '@/stores/editor'
 import { useFlagsStore } from '@/stores/flags'
@@ -492,14 +493,22 @@ function renamePage() {
 }
 
 function deletePage() {
+  // -> Captured before the dialog opens: once the page is gone, the store may already be moving on
+  const deleted = {
+    siteId: siteStore.id,
+    locale: pageStore.locale,
+    path: pageStore.path,
+    localePrefix: siteStore.localeUrlPrefix(pageStore.locale)
+  }
   dialog({
     component: defineAsyncComponent(() => import('../components/PageDeleteDialog.vue')),
     componentProps: {
       pageId: pageStore.id,
       pageName: pageStore.title
     }
-  }).onOk(() => {
-    router.replace('/')
+  }).onOk(async () => {
+    // -> Fork: another page of the same folder rather than the home page (`helpers/pageDeleteLanding.js`)
+    router.replace(await pageDeleteLanding(deleted))
   })
 }
 

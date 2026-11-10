@@ -1,9 +1,10 @@
 <template>
   <!--
-    FORK-ONLY. The buttons a reader gets on a page while no editor is open -- watch, print, the review
-    tray, and Edit or Suggest edits -- as a labelled list for the stacked page layout's side column
-    (`StackedSidebarActions.vue`): one button per line, as wide as the column, its icon and its name
-    against the start edge.
+    FORK-ONLY. The buttons a reader gets on a page while no editor is open -- Edit or Suggest edits,
+    print, watch, the review tray -- for the stacked page layout's side column
+    (`StackedSidebarActions.vue`), in two parts the column puts in two places: `primary` is Edit (or
+    Suggest edits) as a labelled button as wide as the column, and `icons` is the rest as icon-only
+    buttons named by their tooltips, flowing into the column's icon grid (`display: contents`).
 
     THIS MIRRORS THE READER'S ROW IN `PageHeader.vue`, BY HAND. That file is upstream's and is left
     untouched so that it merges cleanly, so the same buttons -- behind the same gates, running the same
@@ -15,104 +16,7 @@
     The caller decides WHEN to render this (while an editor is open there is nothing for a reader to
     do), so it does not look at the editor itself.
   -->
-  <div class="page-reader-actions is-list">
-    <!--
-      Watching a page is a state of it, so the button IS the state: filled and orange while the
-      page is watched, an outline in grey while it is not. Same orange as Edit, because both are
-      this reader's own hold on the page rather than decoration.
-
-      `mdi` rather than the `la` the rest of the list uses, because Line Awesome has no filled bell
-      to switch TO: its bell and its bell-solid carry an identical body in Iconify, so that pair
-      drew one drawing in two colours. (Names left unquoted on purpose — the icon bundler scans
-      this file for quoted references and would keep bundling an icon nothing draws.)
-
-      Not offered on a redirection: a watch is an offer to be told when a page's content changes,
-      and nobody is reading this one — they are passing through it.
-    -->
-    <w-btn
-      :class="{ 'is-ringing': state.bellRinging }"
-      v-if="userStore.authenticated && !isRedirect"
-      flat
-      dense
-      :icon="pageStore.isWatching ? `mdi:bell` : `la:bell`"
-      :color="pageStore.isWatching ? `deep-orange-9` : `grey`"
-      :label="watchLabel"
-      no-caps
-      :aria-label="watchLabel"
-      :aria-pressed="pageStore.isWatching"
-      @click="toggleWatch" />
-    <w-btn
-      v-if="siteStore.theme.showPrintBtn"
-      flat
-      dense
-      icon="la:print"
-      color="grey"
-      :label="t(`common.actions.print`)"
-      no-caps
-      :aria-label="t(`common.actions.print`)"
-      @click="printPage" />
-    <!--
-      Only for whoever reviews this page: the server answers `canReview` from the approval rules
-      and the reviewer's own permissions — with the page itself — so nothing here has to know how
-      that is decided, or ask about it.
-
-      An empty queue is grey and an empty tray, sitting with Print as one more thing available
-      rather than one more thing to do; something waiting fills the tray and turns it orange, the
-      colour this list uses for what belongs to the reader. The count is on the badge either way.
-
-      A redirection takes no suggestions -- see the button below -- so there is never a queue on
-      one to review.
-    -->
-    <w-btn
-      v-if="pageStore.canReview && !isRedirect"
-      flat
-      dense
-      :color="pendingCount > 0 ? `deep-orange-9` : `grey`"
-      :icon="inboxIcon"
-      :label="t(`inbox.pendingReview`)"
-      no-caps
-      :aria-label="t(`inbox.pendingReview`)">
-      <!-- -> The badge floats against the button, which is the positioned box here -->
-      <w-badge v-if="pendingCount > 0" color="deep-orange-9" text-color="white" rounded floating>
-        <strong>{{ pendingCount }}</strong>
-      </w-badge>
-      <!--
-        Down from the button's far edge, as the header's menus hang: the panel is wider than the
-        button, so aligning the edges on that side is what keeps it on screen -- the right ones, or
-        the left ones on a right-to-left interface.
-      -->
-      <w-menu
-        class="translucent-menu"
-        :anchor="`bottom ${endSide}`"
-        :self="`top ${endSide}`"
-        auto-close>
-        <w-list padding style="min-width: 320px">
-          <w-item v-if="pendingCount < 1">
-            <w-item-section>
-              <w-item-label caption>{{ t('inbox.reviewNone') }}</w-item-label>
-            </w-item-section>
-          </w-item>
-          <w-item
-            v-for="submission of pageStore.pendingSubmissions"
-            :key="submission.id"
-            clickable
-            @click="reviewSubmission(submission)">
-            <w-item-section class="items-center" avatar>
-              <w-icon class="text-deep-orange-9" name="la:file-alt" size="sm" />
-            </w-item-section>
-            <w-item-section>
-              <w-item-label>
-                {{ submission.author.name || t('inbox.reviewUnknownAuthor') }}
-              </w-item-label>
-              <w-item-label caption>{{ humanizeDate(submission.createdAt) }}</w-item-label>
-            </w-item-section>
-            <w-item-section side v-if="submission.isStale">
-              <w-badge color="warning" rounded>{{ t('inbox.reviewStale') }}</w-badge>
-            </w-item-section>
-          </w-item>
-        </w-list>
-      </w-menu>
-    </w-btn>
+  <div v-if="part === `primary`" class="page-reader-actions is-primary">
     <!--
       Disabled rather than hidden on a page locked against edits, with the reason in its tooltip: a
       button that vanishes says nothing, and the reader may well hold the permission it used to need.
@@ -178,6 +82,101 @@
         @click="suggestEdits" />
     </template>
   </div>
+  <div v-else class="page-reader-actions is-icons">
+    <w-btn
+      v-if="siteStore.theme.showPrintBtn"
+      flat
+      icon="la:print"
+      color="grey"
+      :aria-label="t(`common.actions.print`)"
+      @click="printPage">
+      <w-tooltip>{{ t(`common.actions.print`) }}</w-tooltip>
+    </w-btn>
+    <!--
+      Watching a page is a state of it, so the button IS the state: filled and orange while the
+      page is watched, an outline in grey while it is not. Same orange as Edit, because both are
+      this reader's own hold on the page rather than decoration.
+
+      `mdi` rather than the `la` the rest of the list uses, because Line Awesome has no filled bell
+      to switch TO: its bell and its bell-solid carry an identical body in Iconify, so that pair
+      drew one drawing in two colours. (Names left unquoted on purpose — the icon bundler scans
+      this file for quoted references and would keep bundling an icon nothing draws.)
+
+      Not offered on a redirection: a watch is an offer to be told when a page's content changes,
+      and nobody is reading this one — they are passing through it.
+    -->
+    <w-btn
+      :class="{ 'is-ringing': state.bellRinging }"
+      v-if="userStore.authenticated && !isRedirect"
+      flat
+      :icon="pageStore.isWatching ? `mdi:bell` : `la:bell`"
+      :color="pageStore.isWatching ? `deep-orange-9` : `grey`"
+      :aria-label="watchLabel"
+      :aria-pressed="pageStore.isWatching"
+      @click="toggleWatch">
+      <w-tooltip>{{ watchLabel }}</w-tooltip>
+    </w-btn>
+    <!--
+      Only for whoever reviews this page: the server answers `canReview` from the approval rules
+      and the reviewer's own permissions — with the page itself — so nothing here has to know how
+      that is decided, or ask about it.
+
+      An empty queue is grey and an empty tray, sitting with Print as one more thing available
+      rather than one more thing to do; something waiting fills the tray and turns it orange, the
+      colour this list uses for what belongs to the reader. The count is on the badge either way.
+
+      A redirection takes no suggestions -- see the button below -- so there is never a queue on
+      one to review.
+    -->
+    <w-btn
+      v-if="pageStore.canReview && !isRedirect"
+      flat
+      :color="pendingCount > 0 ? `deep-orange-9` : `grey`"
+      :icon="inboxIcon"
+      :aria-label="t(`inbox.pendingReview`)">
+      <w-tooltip>{{ t(`inbox.pendingReview`) }}</w-tooltip>
+      <!-- -> The badge floats against the button, which is the positioned box here -->
+      <w-badge v-if="pendingCount > 0" color="deep-orange-9" text-color="white" rounded floating>
+        <strong>{{ pendingCount }}</strong>
+      </w-badge>
+      <!--
+        Down from the button's far edge, as the header's menus hang: the panel is wider than the
+        button, so aligning the edges on that side is what keeps it on screen -- the right ones, or
+        the left ones on a right-to-left interface.
+      -->
+      <w-menu
+        class="translucent-menu"
+        :anchor="`bottom ${endSide}`"
+        :self="`top ${endSide}`"
+        auto-close>
+        <w-list padding style="min-width: 320px">
+          <w-item v-if="pendingCount < 1">
+            <w-item-section>
+              <w-item-label caption>{{ t('inbox.reviewNone') }}</w-item-label>
+            </w-item-section>
+          </w-item>
+          <w-item
+            v-for="submission of pageStore.pendingSubmissions"
+            :key="submission.id"
+            clickable
+            @click="reviewSubmission(submission)">
+            <w-item-section class="items-center" avatar>
+              <w-icon class="text-deep-orange-9" name="la:file-alt" size="sm" />
+            </w-item-section>
+            <w-item-section>
+              <w-item-label>
+                {{ submission.author.name || t('inbox.reviewUnknownAuthor') }}
+              </w-item-label>
+              <w-item-label caption>{{ humanizeDate(submission.createdAt) }}</w-item-label>
+            </w-item-section>
+            <w-item-section side v-if="submission.isStale">
+              <w-badge color="warning" rounded>{{ t('inbox.reviewStale') }}</w-badge>
+            </w-item-section>
+          </w-item>
+        </w-list>
+      </w-menu>
+    </w-btn>
+  </div>
 </template>
 
 <script setup>
@@ -192,6 +191,15 @@ import { useCommonStore } from '@/stores/common'
 import { usePageStore } from '@/stores/page'
 import { useSiteStore } from '@/stores/site'
 import { useUserStore } from '@/stores/user'
+
+defineProps({
+  /** Which half to draw: Edit or Suggest edits (`primary`) or the icon buttons (`icons`). */
+  part: {
+    type: String,
+    default: 'icons',
+    validator: (value) => ['primary', 'icons'].includes(value)
+  }
+})
 
 /**
  * How long the bell swings for, in milliseconds. Matches the `w-bell-ring` animation below — the class
@@ -345,7 +353,7 @@ async function toggleWatch() {
 
   Reaches `WBtn`'s root through the scoped attribute a child's root element inherits.
 */
-.page-reader-actions.is-list {
+.page-reader-actions.is-primary {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -356,6 +364,11 @@ async function toggleWatch() {
     justify-content: flex-start;
     text-align: start;
   }
+}
+
+/* -> The icon buttons belong to the column's grid (`StackedSidebarActions.vue`), not to a box of their own */
+.page-reader-actions.is-icons {
+  display: contents;
 }
 
 /*
