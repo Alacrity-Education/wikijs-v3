@@ -64,6 +64,16 @@
           <w-item-section class="wrap-anywhere text-white">{{ item.label }}</w-item-section>
         </w-item>
         <!--
+          A menu item opening a folder of files alone, kept for the page sharing its path: the server
+          sends one only where there is such a page (`targetAssetOnly`), and the empty menu gets no way in.
+        -->
+        <w-item
+          v-else-if="item.type === `menu` && item.targetAssetOnly && item.targetPage != null"
+          :to="pageHref(item.targetPage)">
+          <w-item-section side><w-icon :name="item.icon" color="white" /></w-item-section>
+          <w-item-section class="wrap-anywhere text-white">{{ item.label }}</w-item-section>
+        </w-item>
+        <!--
           Two ways in on one row, where the item links to the page at the target menu's location too:
           the row goes to the page and the chevron, a control of its own, opens the menu. Two siblings
           rather than a button inside the link -- an interactive element inside an anchor is not one

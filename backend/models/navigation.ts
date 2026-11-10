@@ -65,6 +65,8 @@ export interface NavigationOwner {
   tags: string[]
   /** Whether this is a locale's site-wide menu, the one every page falls back to. */
   isRoot: boolean
+  /** Whether the entry owning the menu is a folder, rather than a page or nothing (a root menu). */
+  isFolder: boolean
   /**
    * The page at the menu's location, if one exists: the page owning it, the page sharing the path of
    * the folder owning it, or the home page for a locale's root menu.
@@ -165,6 +167,11 @@ class Navigation {
    *                   levels, unless `unfiltered` is set.
    * @param unfiltered Return every item regardless of visibility, which is what editing one needs —
    *                   an editor that could not see an item would drop it on the next save.
+   * @param hideAssetOnlyFolders For a reader: leave out the `menu` items opening the menu of a folder
+   *                   holding no page at any depth — files only — or, where the item also links to a
+   *                   page sharing the folder's path, keep the link and mark it `targetAssetOnly` so the
+   *                   sidebar draws no chevron into a menu that has nothing to list. Ignored with
+   *                   `unfiltered`: the editor is shown every item, so that it saves every item back.
    */
   async getNav(
     siteId: string,
@@ -172,10 +179,12 @@ class Navigation {
     {
       userGroups = [],
       unfiltered = false,
+      hideAssetOnlyFolders = false,
       mayOpenPage
     }: {
       userGroups?: string[]
       unfiltered?: boolean
+      hideAssetOnlyFolders?: boolean
       /**
        * Asked of the page a `showLink` menu item would link to: whether this reader may be sent there.
        * Without it no item links anywhere, which is the safe answer for a caller that has not said.
@@ -211,17 +220,71 @@ class Navigation {
       .filter((item) => isVisibleTo(item, userGroups))
       .filter((item) => item.type !== 'menu' || targets.has(item.targetNavId ?? ''))
     const pages = await this.targetPagesOf(siteId, visible, targets)
-    return visible.map((item) => {
+    const assetOnly = hideAssetOnlyFolders
+      ? await this.assetOnlyFolders(siteId, visible, targets)
+      : new Set<string>()
+    return visible.flatMap((item) => {
       if (item.type === 'menu') {
         // -> Only a page this reader may be sent to: anything else would hand out the path of a page
         //    they may not know exists, for a link that could only answer them with a 404
         const page = pages.get(item.targetNavId ?? '')
-        return page && mayOpenPage?.(page) ? { ...item, targetPage: page.path } : item
+        const targetPage = page && mayOpenPage?.(page) ? page.path : null
+        if (assetOnly.has(item.targetNavId ?? '')) {
+          // -> A folder of files alone has no menu worth opening: the page beside it, or nothing
+          return targetPage ? [{ ...item, targetPage, targetAssetOnly: true }] : []
+        }
+        return [targetPage ? { ...item, targetPage } : item]
       }
-      return item.children?.length
-        ? { ...item, children: item.children.filter((c) => isVisibleTo(c, userGroups)) }
-        : item
+      return [
+        item.children?.length
+          ? { ...item, children: item.children.filter((c) => isVisibleTo(c, userGroups)) }
+          : item
+      ]
     })
+  }
+
+  /**
+   * Of the menus the `menu` items of one menu open, the ids of those owned by a folder holding no
+   * page at any depth below it — a folder of uploaded files alone. A page SHARING the folder's path
+   * is beside it rather than in it, so it does not count: that is the case `getNav` keeps as a link.
+   *
+   * Drafts and scheduled pages count as pages here. Whether a reader may see them is the page rules'
+   * question, asked where the folder is listed; this one is only whether the folder is a place pages
+   * are kept at all.
+   */
+  private async assetOnlyFolders(
+    siteId: string,
+    items: NavigationItem[],
+    targets: Map<string, NavigationOwner>
+  ): Promise<Set<string>> {
+    const folders = new Map<string, NavigationOwner>()
+    for (const item of items) {
+      const target = targets.get(item.targetNavId ?? '')
+      if (item.type === 'menu' && target?.isFolder && target.path && target.locale) {
+        folders.set(target.id, target)
+      }
+    }
+    const empty = new Set<string>()
+    await Promise.all(
+      [...folders.values()].map(async (folder) => {
+        const rows = await WIKI.db
+          .select({ id: treeTable.id })
+          .from(treeTable)
+          .where(
+            and(
+              eq(treeTable.siteId, siteId),
+              eq(treeTable.locale, folder.locale!),
+              eq(treeTable.type, 'page'),
+              sql`${treeTable.folderPath} <@ ${encodeTreePath(folder.path)}::ltree`
+            )
+          )
+          .limit(1)
+        if (rows.length < 1) {
+          empty.add(folder.id)
+        }
+      })
+    )
+    return empty
   }
 
   /**
@@ -296,6 +359,7 @@ class Navigation {
         folderPath: treeTable.folderPath,
         fileName: treeTable.fileName,
         tags: treeTable.tags,
+        ownerType: treeTable.type,
         /*
           The page at the menu's location: the owning entry itself when it is a page, the page beside
           it when it is a folder -- a page and a folder may share a path -- and the home page for a
@@ -329,6 +393,7 @@ class Navigation {
           path: ownerPath(row),
           tags: (row.tags ?? []) as string[],
           isRoot: row.locale !== null,
+          isFolder: row.locale === null && row.ownerType === 'folder',
           pageId: row.pageId ?? null
         }
       ])

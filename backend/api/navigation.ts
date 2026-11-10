@@ -329,6 +329,11 @@ async function routes(app: FastifyInstance) {
                   type: 'string',
                   description:
                     "Without `full`, on a `showLink` menu item: the path of the page it links to, when this reader may open it. `home` for a locale's home page. Absent otherwise, and the item then only opens the menu."
+                },
+                targetAssetOnly: {
+                  type: 'boolean',
+                  description:
+                    "Without `full`, where the site's `hideAssetOnlyFolders` is on: the menu item opens the menu of a folder holding files and no pages, and is kept only for its link to `targetPage` — drawn as a plain link, with no way into the menu. Such an item with nothing to link to is left out instead."
                 }
               }
             }
@@ -364,6 +369,9 @@ async function routes(app: FastifyInstance) {
             ? (req.session.groups ?? [])
             : [],
         unfiltered,
+        hideAssetOnlyFolders: Boolean(
+          WIKI.sites[req.params.siteId]?.config?.navigation?.hideAssetOnlyFolders
+        ),
         mayOpenPage: (page) =>
           mayOnPage(req, 'read:pages', page) &&
           (page.isLive || (unpublished !== false && unpublished(page)))

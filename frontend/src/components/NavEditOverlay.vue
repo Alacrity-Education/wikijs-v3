@@ -269,7 +269,7 @@
               <blueprint-icon icon="user-groups" />
               <w-item-section>
                 <w-item-label>{{ t(`navEdit.visibility`) }}</w-item-label>
-                <w-item-label caption>{{ t(`navEdit.visibilityHint`) }}</w-item-label>
+                <w-item-label caption>{{ visibilityHint }}</w-item-label>
               </w-item-section>
               <w-item-section avatar>
                 <w-btn-toggle
@@ -453,7 +453,7 @@
               <blueprint-icon icon="user-groups" />
               <w-item-section>
                 <w-item-label>{{ t(`navEdit.visibility`) }}</w-item-label>
-                <w-item-label caption>{{ t(`navEdit.visibilityHint`) }}</w-item-label>
+                <w-item-label caption>{{ visibilityHint }}</w-item-label>
               </w-item-section>
               <w-item-section avatar>
                 <w-btn-toggle
@@ -635,7 +635,7 @@
               <blueprint-icon icon="user-groups" />
               <w-item-section>
                 <w-item-label>{{ t(`navEdit.visibility`) }}</w-item-label>
-                <w-item-label caption>{{ t(`navEdit.visibilityHint`) }}</w-item-label>
+                <w-item-label caption>{{ visibilityHint }}</w-item-label>
               </w-item-section>
               <w-item-section avatar>
                 <w-btn-toggle
@@ -685,7 +685,7 @@
               <blueprint-icon icon="user-groups" />
               <w-item-section>
                 <w-item-label>{{ t(`navEdit.visibility`) }}</w-item-label>
-                <w-item-label caption>{{ t(`navEdit.visibilityHint`) }}</w-item-label>
+                <w-item-label caption>{{ visibilityHint }}</w-item-label>
               </w-item-section>
               <w-item-section avatar>
                 <w-btn-toggle
@@ -822,6 +822,17 @@ const visibilityOptions = computed(() => [
 ])
 
 // COMPUTED
+
+/**
+ * Under every item's visibility setting. Where the site hides asset-only folders from readers, an item
+ * set visible to everyone can still be left out of the sidebar, so the editor says so -- it lists
+ * every item regardless, since what it does not show it would not save back.
+ */
+const visibilityHint = computed(() =>
+  siteStore.navigation.hideAssetOnlyFolders
+    ? `${t('navEdit.visibilityHint')} ${t('navEdit.visibilityHintAssetOnly')}`
+    : t('navEdit.visibilityHint')
+)
 
 /**
  * The menu being edited.

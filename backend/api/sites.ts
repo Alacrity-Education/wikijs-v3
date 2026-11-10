@@ -303,6 +303,7 @@ async function routes(app: FastifyInstance) {
         deleteOrphanedMenus?: boolean
         includeStorageOperations?: boolean
         showParentLink?: boolean
+        hideAssetOnlyFolders?: boolean
       }
       locales?: {
         primary?: string

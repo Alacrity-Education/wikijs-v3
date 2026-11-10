@@ -268,7 +268,8 @@ class Sites {
           createFolderMenus: true,
           deleteOrphanedMenus: true,
           includeStorageOperations: true,
-          showParentLink: true
+          showParentLink: true,
+          hideAssetOnlyFolders: false
         },
         assets: {
           logo: false,
@@ -695,7 +696,8 @@ class Sites {
           createFolderMenus: true,
           deleteOrphanedMenus: true,
           includeStorageOperations: true,
-          showParentLink: true
+          showParentLink: true,
+          hideAssetOnlyFolders: false
         },
         assets: {
           logo: false,

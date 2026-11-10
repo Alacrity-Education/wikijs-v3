@@ -333,6 +333,11 @@ export async function registerSchemas(app: FastifyInstance): Promise<void> {
             description:
               'Show a "Go up" link at the top of every menu that is not a locale\'s root menu, to the page or folder above the one owning it — unless the menu was opened from a menu item, where "Go back" takes its place.'
           },
+          hideAssetOnlyFolders: {
+            type: 'boolean',
+            description:
+              "Leave out of the sidebar the menu items opening the menu of a folder that holds files and no pages, at any depth. Where such an item also links to a page sharing the folder's path, it stays as a plain link to that page, with no way into the empty menu. Only what readers are shown: the menu editor keeps listing every item."
+          },
           includeStorageOperations: {
             type: 'boolean',
             description:
