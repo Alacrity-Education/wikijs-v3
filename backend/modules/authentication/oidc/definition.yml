@@ -209,6 +209,37 @@ props:
     order: 27
     if:
       - { key: 'mapGroups', eq: true }
+  autoCreateGroups:
+    type: Boolean
+    title: Auto-create groups if they are missing
+    hint: Create a wiki group for a name the claim carries that no group here has (after the ignore list and the mappings below), instead of skipping it. A created group starts as one made under Administration → Groups does — read access everywhere and nothing more — so give it rules there before it means anything.
+    icon: user-groups
+    default: false
+    order: 27.1
+    if:
+      - { key: 'mapGroups', eq: true }
+  groupMappings:
+    type: String
+    title: Group Mappings
+    hint: "Optional - One per line: `provider group -> wiki group`, e.g. `ItAdmins -> Administrators`. The person is put in the wiki group INSTEAD of one named after the provider's. Names are compared ignoring case; list a provider group twice to map it to two wiki groups. Lines starting with # are ignored. Mapping to an administrators group hands out its permissions to everybody the provider puts in the group."
+    icon: link
+    multiline: true
+    format: groupMappings
+    default: ''
+    order: 27.2
+    if:
+      - { key: 'mapGroups', eq: true }
+  groupFilters:
+    type: String
+    title: Ignored Groups
+    hint: "Optional - One regular expression per line; a provider group whose name matches any of them is ignored entirely — not matched, not mapped, not created. Matched ignoring case, anywhere in the name unless anchored: `^authentik ` for the provider's own groups. Lines starting with # are ignored."
+    icon: unfriend
+    multiline: true
+    format: regexList
+    default: ''
+    order: 27.3
+    if:
+      - { key: 'mapGroups', eq: true }
   unassignMissingGroups:
     type: Boolean
     title: Unassign from groups no longer present in claim

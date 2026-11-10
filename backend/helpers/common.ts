@@ -700,6 +700,11 @@ export interface ModulePropDefinition {
   enum?: string[] | false
   enumDisplay?: string
   multiline?: boolean
+  /**
+   * Fork: a string prop whose value has a syntax of its own, checked when the configuration is saved —
+   * a key of `PROP_FORMAT_CHECKS` (`helpers/providerGroups.ts`): `regexList`, `groupMappings`.
+   */
+  format?: string
   sensitive?: boolean
   readOnly?: boolean
   localPath?: ModuleLocalPathScope
@@ -717,6 +722,8 @@ export interface ModuleProp {
   enum: string[] | false
   enumDisplay: string
   multiline: boolean
+  /** See `ModulePropDefinition.format`. Null for a prop with no syntax of its own. */
+  format: string | null
   sensitive: boolean
   /** Shown but not editable — the module declares something this server cannot currently change. */
   readOnly: boolean
@@ -828,6 +835,7 @@ export function parseModuleProps(
       enum: def.enum || false,
       enumDisplay: def.enumDisplay || 'select',
       multiline: def.multiline || false,
+      format: def.format ?? null,
       sensitive: def.sensitive || false,
       readOnly: def.readOnly || false,
       localPath: def.localPath ?? null,

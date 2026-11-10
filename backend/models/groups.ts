@@ -614,7 +614,12 @@ class Groups {
     return clash.length > 0 ? `There is already a group named "${clash[0].name}".` : null
   }
 
-  async createGroup(name: string): Promise<string> {
+  /**
+   * What a new group is stored with: the name, and the one default rule the Users group starts with.
+   * Shared by `createGroup` and `ensureGroups`, so a group an identity provider brought in is exactly
+   * what an administrator creating it would have got.
+   */
+  private newGroupValues(name: string) {
     // -> What the Users group starts with, for the same reasons: see `init()`
     const startingRoles = [
       'read:pages',
@@ -625,31 +630,82 @@ class Groups {
       'read:notes',
       'write:feedback'
     ]
+    return {
+      // -> Trimmed here rather than at the boundary, so that what is stored is what `validateName`
+      //    compared and no route can store a name that would not have passed
+      name: name.trim(),
+      permissions: [] as string[],
+      rules: [
+        {
+          id: uuid(),
+          name: 'Default Rule',
+          roles: startingRoles,
+          match: 'START',
+          mode: 'ALLOW',
+          path: '',
+          tags: [],
+          locales: [],
+          sites: []
+        }
+      ],
+      isSystem: false
+    }
+  }
+
+  async createGroup(name: string): Promise<string> {
     const result = await WIKI.db
       .insert(groupsTable)
-      .values({
-        // -> Trimmed here rather than at the boundary, so that what is stored is what `validateName`
-        //    compared and no route can store a name that would not have passed
-        name: name.trim(),
-        permissions: [],
-        rules: [
-          {
-            id: uuid(),
-            name: 'Default Rule',
-            roles: startingRoles,
-            match: 'START',
-            mode: 'ALLOW',
-            path: '',
-            tags: [],
-            locales: [],
-            sites: []
-          }
-        ],
-        isSystem: false
-      })
+      .values(this.newGroupValues(name))
       .returning({ id: groupsTable.id })
     await this.reloadCache()
     return result[0].id
+  }
+
+  /**
+   * Fork: the groups named, by name, creating each that does not exist yet (`createGroup`'s starting
+   * values). For an identity provider's Auto-create groups setting (`users.applyProviderGroups`).
+   *
+   * Names are compared ignoring case, as `validateName` compares them; one that `validateName` would
+   * refuse for its characters is skipped rather than created. Under an advisory lock in one
+   * transaction, because the names have no unique index and two people signing in at once with the
+   * same new group would otherwise create it twice.
+   *
+   * @returns The groups that now exist under those names, id and stored name
+   */
+  async ensureGroups(names: string[]): Promise<{ id: string; name: string; created: boolean }[]> {
+    const wanted = [
+      ...new Map(names.map((n) => [n.trim().toLowerCase(), n.trim()])).values()
+    ].filter((n) => n.length > 0 && /^[^<>"]+$/.test(n))
+    if (wanted.length < 1) {
+      return []
+    }
+    const out = await WIKI.db.transaction(async (trx) => {
+      await trx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('wiki.groups.ensure'))`)
+      const existing = await trx
+        .select({ id: groupsTable.id, name: groupsTable.name })
+        .from(groupsTable)
+        .where(
+          inArray(
+            sql`lower(${groupsTable.name})`,
+            wanted.map((n) => n.toLowerCase())
+          )
+        )
+      const result = existing.map((grp) => ({ ...grp, created: false }))
+      for (const name of wanted) {
+        if (!existing.some((grp) => grp.name.toLowerCase() === name.toLowerCase())) {
+          const row = await trx
+            .insert(groupsTable)
+            .values(this.newGroupValues(name))
+            .returning({ id: groupsTable.id, name: groupsTable.name })
+          result.push({ ...row[0], created: true })
+        }
+      }
+      return result
+    })
+    if (out.some((grp) => grp.created)) {
+      await this.reloadCache()
+    }
+    return out
   }
 
   /**

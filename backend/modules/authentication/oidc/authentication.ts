@@ -1,5 +1,10 @@
 import * as client from 'openid-client'
 import { describeAuthError, missingSettings, strategyDebug } from '../../../helpers/authDebug.ts'
+import {
+  applyGroupRules,
+  parseGroupFilters,
+  parseGroupMappings
+} from '../../../helpers/providerGroups.ts'
 import type {
   AuthFlow,
   AuthFlowCallback,
@@ -304,7 +309,8 @@ export default class OidcAuthentication {
       ...(groups
         ? {
             groups,
-            groupsExclusive: this.conf.unassignMissingGroups === true
+            groupsExclusive: this.conf.unassignMissingGroups === true,
+            createMissingGroups: this.conf.autoCreateGroups === true
           }
         : {})
     }
@@ -469,7 +475,28 @@ export default class OidcAuthentication {
       this,
       `the \`${claim}\` claim names ${names.length} group(s): ${names.join(', ') || 'none'}`
     )
-    return names
+    /*
+      Fork: the strategy's Ignored Groups, then its Group Mappings (`helpers/providerGroups.ts`). Both
+      were checked when the strategy was saved, so a parse error here means one written some other
+      way -- logged, and that half left out rather than failing every login over it.
+    */
+    const filters = parseGroupFilters(this.conf.groupFilters)
+    const mappings = parseGroupMappings(this.conf.groupMappings)
+    for (const err of [filters.error, mappings.error].filter(Boolean)) {
+      strategyDebug(this, `the group settings cannot be read and are skipped: ${err}`)
+    }
+    // -> Each parser answers with nothing to apply when it fails, so the other half still applies
+    const result = applyGroupRules(names, {
+      patterns: filters.patterns,
+      mappings: mappings.mappings
+    })
+    if (result.ignored.length > 0 || mappings.mappings.length > 0) {
+      strategyDebug(
+        this,
+        `after Ignored Groups (${result.ignored.join(', ') || 'none ignored'}) and Group Mappings: ${result.names.join(', ') || 'none'}`
+      )
+    }
+    return result.names
   }
 
   /**

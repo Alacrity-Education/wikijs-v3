@@ -3,6 +3,7 @@ import path from 'node:path'
 import { load } from 'js-yaml'
 import { asc, eq } from 'drizzle-orm'
 import { isSensitiveMask, parseModuleProps } from '../helpers/common.ts'
+import { PROP_FORMAT_CHECKS } from '../helpers/providerGroups.ts'
 import { authentication as authenticationTable, groups as groupsTable } from '../db/schema.ts'
 import type { ModuleProp } from '../helpers/common.ts'
 import type { SystemIds } from './types.ts'
@@ -116,6 +117,11 @@ export interface ProviderProfile {
    * not name is taken away again; unset, the claim only ever adds.
    */
   groupsExclusive?: boolean
+  /**
+   * Fork: whether a name in `groups` that no wiki group has is created as a new group, with what a
+   * group created in the admin area starts with, rather than skipped. See `groups.ensureGroups`.
+   */
+  createMissingGroups?: boolean
   /**
    * Profile fields the provider is the authority for, written over the account's own on every login.
    *
@@ -436,6 +442,12 @@ class Authentication {
         default:
           if (typeof value !== 'string') {
             return `${prop.title} must be a string.`
+          }
+          if (prop.format && PROP_FORMAT_CHECKS[prop.format]) {
+            const invalid = PROP_FORMAT_CHECKS[prop.format](value)
+            if (invalid) {
+              return `${prop.title}: ${invalid}`
+            }
           }
       }
     }

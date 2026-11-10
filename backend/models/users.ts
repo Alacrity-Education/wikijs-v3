@@ -1136,10 +1136,13 @@ class Users {
   /**
    * Put a user in the wiki groups an identity provider named for them.
    *
-   * Groups are matched by name, ignoring case, and only ever matched: a claim naming a group this
-   * wiki does not have is not an instruction to create one. A group here is a set of permissions and
-   * page rules that somebody wrote deliberately, and an empty one created from a directory entry
-   * would grant nothing while looking like it grants something.
+   * Groups are matched by name, ignoring case, and by default only ever matched: a claim naming a
+   * group this wiki does not have is not an instruction to create one. A group here is a set of
+   * permissions and page rules that somebody wrote deliberately, and an empty one created from a
+   * directory entry would grant nothing while looking like it grants something. Fork: unless the
+   * strategy asks for it (`createMissingGroups`, OIDC's Auto-create groups), in which case the missing
+   * ones are created with what a new group starts with (`groups.ensureGroups`) and joined like any
+   * other — the administrator having said that the provider's directory is the list of groups.
    *
    * What the claim does NOT name is the half worth being careful about. Without `groupsExclusive` the
    * claim only ever adds, so a membership granted here survives a directory that has never heard of
@@ -1167,9 +1170,22 @@ class Users {
       .select({ id: groupsTable.id, name: groupsTable.name })
       .from(groupsTable)
     const matched = all.filter((grp) => claimed.includes(grp.name.toLowerCase()))
-    const unmatched = profile.groups.filter(
+    let unmatched = profile.groups.filter(
       (name) => !all.some((grp) => grp.name.toLowerCase() === name.toLowerCase())
     )
+    if (profile.createMissingGroups && unmatched.length > 0) {
+      const ensured = await WIKI.models.groups.ensureGroups(unmatched)
+      const created = ensured.filter((grp) => grp.created)
+      if (created.length > 0) {
+        WIKI.logger.info(
+          `Created ${created.length} group(s) named by strategy ${strategy.id} for user ${userId}: ${created.map((grp) => grp.name).join(', ')}`
+        )
+      }
+      matched.push(...ensured.filter((grp) => !matched.some((m) => m.id === grp.id)))
+      unmatched = unmatched.filter(
+        (name) => !ensured.some((grp) => grp.name.toLowerCase() === name.trim().toLowerCase())
+      )
+    }
     /*
       Both halves of the answer, and logged even when the provider named nothing: an empty claim is
       the commonest reason a group mapping appears not to work, and it is silent everywhere else — the
