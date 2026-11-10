@@ -205,6 +205,8 @@ export function slugifyHeading(text: string): string {
  * a property of that block's own markup.
  */
 const TAB_TAG = 'block-tab'
+/** Fork: the card of a `block-cards` row, whose title is a heading left out of the contents. */
+const CARD_TAG = 'block-card'
 
 /**
  * The heading level a tab asked to be listed at, or null for one that is not a heading.
@@ -536,6 +538,9 @@ class Rendering {
    * who clicks that row is taken there by the same path as a heading inside a closed tab — the app
    * asks whatever is above the target to reveal it, and `block-tabs` answers by opening the panel.
    *
+   * Fork: **a heading inside a `block-card` is left out** -- it is the card's title, drawn at a
+   * section's size, and listing every card of a row as a section would bury the page's own.
+   *
    * They are matched in one pass rather than two, because a heading written inside a panel has to
    * nest under the tab it is in, and that is only true if both arrive in document order.
    */
@@ -550,6 +555,10 @@ class Rendering {
         ? tabHeadingLevel(element.attr('header'))
         : Number.parseInt(el.tagName.slice(1), 10)
       const label = (isTab ? element.attr('label') : element.text())?.trim() ?? ''
+      // -> Fork: a card's title is a heading for its looks and its readers, not a section of the page
+      if (!isTab && element.closest(CARD_TAG).length > 0) {
+        return
+      }
       /*
         A tab that asked for a level it cannot have, or that has nothing to be called, stays an
         ordinary tab. Both are the author's mistakes rather than the page's, and a page has to render

@@ -103,6 +103,10 @@ export function anchorHeadings(root) {
 
   for (const el of root.querySelectorAll('h1, h2, h3, h4, h5, h6, block-tab[header]')) {
     const isTab = el.localName === 'block-tab'
+    // -> Fork: a card's title is a heading, not a section -- as the server's `anchorHeadings` says
+    if (!isTab && el.closest('block-card')) {
+      continue
+    }
     const level = isTab ? tabHeadingLevel(el.getAttribute('header')) : Number(el.localName.slice(1))
     const label = ((isTab ? el.getAttribute('label') : el.textContent) ?? '').trim()
     if (!level || (isTab && !label)) {

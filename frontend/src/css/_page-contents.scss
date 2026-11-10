@@ -2062,6 +2062,51 @@
     text-align: start;
   }
 
+  /*
+    Fork. Cards: what a `::block-card` holds, sorted by the card into a title, a picture, the text
+    beside it and the text below (`blocks/block-card`), which draws the outlined box around them.
+
+    Here rather than in the block for the reason `block-steps` gives: this is page content, and a
+    document's own rules outrank a shadow root's `::slotted()` ones. The card marks the first and
+    last element of each part, so each sits flush against the edges of its part of the card.
+  */
+  block-card {
+    > [data-card-first] {
+      margin-top: 0;
+    }
+    > [data-card-last] {
+      margin-bottom: 0;
+    }
+
+    /* -> The title is a section's size whatever level it was written at, without a section's rule */
+    > [slot='title'] {
+      margin-block: 0;
+      padding-bottom: 0;
+      font-size: 1.5em;
+      letter-spacing: -0.01em;
+
+      &::after {
+        content: none;
+      }
+
+      @media (max-width: $breakpoint-xs-max) {
+        font-size: 1.375em;
+      }
+    }
+
+    /* -> The picture fills the column the card gives it, `pictureSize` wide */
+    > [slot='picture'] {
+      margin: 0;
+
+      img {
+        display: block;
+        width: 100%;
+        max-width: none;
+        height: auto;
+      }
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // FIGURES, IMAGES AND DIAGRAMS
   // ---------------------------------------------------------------------------
