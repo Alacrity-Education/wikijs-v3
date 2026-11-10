@@ -13,6 +13,18 @@
           <w-item-section side><w-icon name="la:arrow-left" color="white" /></w-item-section>
           <w-item-section class="text-white">{{ t('navEdit.goBack') }}</w-item-section>
         </w-item>
+        <!-- -> Fork: the folder's own page, where the item this menu was opened from links to one --
+                the folder's landing page, listed with the folder it heads (`nav.opener`) -->
+        <w-item
+          v-if="siteStore.nav.opener?.targetPage != null"
+          :to="pageHref(siteStore.nav.opener.targetPage)">
+          <w-item-section side
+            ><w-icon :name="siteStore.nav.opener.icon" color="white"
+          /></w-item-section>
+          <w-item-section class="wrap-anywhere text-white">{{
+            siteStore.nav.opener.label
+          }}</w-item-section>
+        </w-item>
         <w-separator dark />
       </template>
       <!--
@@ -92,7 +104,7 @@
             dense
             clickable
             :aria-label="t('navEdit.showMenu', { label: item.label })"
-            @click="siteStore.openNavigationMenu(item.targetNavId)">
+            @click="siteStore.openNavigationMenu(item.targetNavId, item)">
             <w-item-section side><w-icon name="mdi:chevron-right" color="white" /></w-item-section>
           </w-item>
         </div>
@@ -100,7 +112,7 @@
         <w-item
           v-else-if="item.type === `menu`"
           clickable
-          @click="siteStore.openNavigationMenu(item.targetNavId)">
+          @click="siteStore.openNavigationMenu(item.targetNavId, item)">
           <w-item-section side><w-icon :name="item.icon" color="white" /></w-item-section>
           <w-item-section class="wrap-anywhere text-white">{{ item.label }}</w-item-section>
           <w-item-section side><w-icon name="mdi:chevron-right" color="white" /></w-item-section>
@@ -252,7 +264,7 @@ watch(
   () => [pageStore.id, pageStore.navigationId],
   ([, navigationId]) => {
     if (navigationId) {
-      siteStore.showPageNavigation(navigationId)
+      siteStore.showPageNavigation(navigationId, { path: pageStore.path })
     }
   },
   { immediate: true }

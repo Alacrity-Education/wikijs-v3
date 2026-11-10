@@ -233,6 +233,12 @@ export const useSiteStore = defineStore('site', {
       currentId: null,
       items: [],
       /*
+        Fork: the `menu` item the menu on screen was opened from, while it was opened from one -- what
+        the sidebar lists under "Go back" when that item also links to a page (`targetPage`): the page
+        sharing the folder's path, which is the folder's own landing page. Null for the page's own menu.
+      */
+      opener: null,
+      /*
         The menus a reader went through to reach the one on screen, by opening a `menu` item -- each as
         `{ currentId, items }`, the page's own menu first. Empty whenever the sidebar shows the menu the
         page resolves to, which is what "Go back" being offered depends on. Not remembered: a page
@@ -638,7 +644,7 @@ export const useSiteStore = defineStore('site', {
         this.fetchNavigationParent(id)
       ])
       this.$patch((state) => {
-        state.nav = { currentId: id, items: items ?? [], stack: [] }
+        state.nav = { currentId: id, items: items ?? [], opener: null, stack: [] }
         if (navParent) {
           state.navParent = navParent
         }
@@ -650,11 +656,21 @@ export const useSiteStore = defineStore('site', {
      * Asked on every page load, not only when the page's menu changes: following a link out of an
      * opened menu lands on a page that very often resolves to that same menu, and it is shown then as
      * the page's own -- without "Go back".
+     *
+     * Fork: on a folder's own page -- the page sharing a folder's path, which that folder's `menu` item
+     * in this menu links to -- the folder's menu is opened straight away, as if the reader had clicked
+     * its chevron: they are at the top of that folder, and its pages are what they will want next. "Go
+     * back" returns to the menu the page resolves to, and the page itself is listed under it.
+     *
+     * @param id The page's `navigationId`
+     * @param path The page's path, which is what a `menu` item's `targetPage` names
      */
-    async showPageNavigation(id) {
+    async showPageNavigation(id, { path } = {}) {
       const base = this.nav.stack[0]
       if (base?.currentId === id) {
-        this.$patch({ nav: { currentId: base.currentId, items: base.items, stack: [] } })
+        this.$patch({
+          nav: { currentId: base.currentId, items: base.items, opener: null, stack: [] }
+        })
         await this.refreshNavigation()
       } else if (this.nav.stack.length > 0 || id !== this.nav.currentId) {
         await this.fetchNavigation(id)
@@ -663,6 +679,15 @@ export const useSiteStore = defineStore('site', {
         await this.refreshNavigation()
       }
       await this.loadNavigationParent()
+      const folderItem =
+        path && this.nav.currentId === id && this.nav.stack.length < 1
+          ? this.nav.items.find(
+              (item) => item.type === 'menu' && !item.targetMenuHidden && item.targetPage === path
+            )
+          : null
+      if (folderItem) {
+        await this.openNavigationMenu(folderItem.targetNavId, folderItem)
+      }
     },
     /**
      * Where "Go up" leads from the page's own menu, asked of the server once per menu.
@@ -731,8 +756,10 @@ export const useSiteStore = defineStore('site', {
      *
      * Fetched as a reader fetches any menu, so items limited to other groups are left out. Dropped if
      * the sidebar moved on while it was in flight -- a page loaded, or another menu opened.
+     *
+     * @param opener Fork: the item it was opened from, kept as `nav.opener` -- see the state
      */
-    async openNavigationMenu(id) {
+    async openNavigationMenu(id, opener = null) {
       const from = this.nav.currentId
       try {
         const items = await API_CLIENT.get(`sites/${this.id}/navigation/${id}`).json()
@@ -743,7 +770,11 @@ export const useSiteStore = defineStore('site', {
           nav: {
             currentId: id,
             items: items ?? [],
-            stack: [...this.nav.stack, { currentId: this.nav.currentId, items: this.nav.items }]
+            opener,
+            stack: [
+              ...this.nav.stack,
+              { currentId: this.nav.currentId, items: this.nav.items, opener: this.nav.opener }
+            ]
           }
         })
       } catch (err) {
@@ -760,6 +791,7 @@ export const useSiteStore = defineStore('site', {
         nav: {
           currentId: previous.currentId,
           items: previous.items,
+          opener: previous.opener ?? null,
           stack: this.nav.stack.slice(0, -1)
         }
       })
