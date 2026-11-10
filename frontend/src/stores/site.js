@@ -660,13 +660,22 @@ export const useSiteStore = defineStore('site', {
      * Fork: on a folder's own page -- the page sharing a folder's path, which that folder's `menu` item
      * in this menu links to -- the folder's menu is opened straight away, as if the reader had clicked
      * its chevron: they are at the top of that folder, and its pages are what they will want next. "Go
-     * back" returns to the menu the page resolves to, and the page itself is listed under it.
+     * back" returns to the menu the page resolves to, and the page itself is listed under it. Following
+     * a link out of a menu opened that way to a page resolving to that same menu -- one of the folder's
+     * own pages -- keeps it as opened, "Go back" and landing page included.
      *
      * @param id The page's `navigationId`
      * @param path The page's path, which is what a `menu` item's `targetPage` names
      */
     async showPageNavigation(id, { path } = {}) {
       const base = this.nav.stack[0]
+      if (this.nav.stack.length > 0 && this.nav.opener && this.nav.currentId === id) {
+        // -> Fork: a page of the folder whose menu the reader opened -- that menu is the page's own
+        //    too. It stays as opened, with "Go back" and the folder's landing page listed under it,
+        //    rather than starting over as the page's own menu and losing both
+        await this.reloadOpenedNavigation(id)
+        return
+      }
       if (base?.currentId === id) {
         this.$patch({
           nav: { currentId: base.currentId, items: base.items, opener: null, stack: [] }
