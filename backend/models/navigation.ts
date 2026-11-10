@@ -446,6 +446,25 @@ class Navigation {
   }
 
   /**
+   * Fork: the menu the page at a menu's location resolves to -- for a folder's menu, the menu its
+   * landing page shows, which is where a `menu` item leading into the folder is. Null for a locale's
+   * root menu, for a menu with no page at its location, and where that page shows this same menu.
+   */
+  async landingNavId(siteId: string, navId: string): Promise<string | null> {
+    const owner = (await this.describeNavs(siteId, [navId])).get(navId)
+    if (!owner || owner.isRoot || !owner.pageId) {
+      return null
+    }
+    const rows = await WIKI.db
+      .select({ navigationId: treeTable.navigationId })
+      .from(treeTable)
+      .where(and(eq(treeTable.id, owner.pageId), eq(treeTable.siteId, siteId)))
+      .limit(1)
+    const id = rows[0]?.navigationId ?? null
+    return id && id !== navId ? id : null
+  }
+
+  /**
    * The menus the `menu` items of one menu point at that are still there to open, by id.
    *
    * A target is gone when its menu was deleted — by the admin area, or with the page owning it — and

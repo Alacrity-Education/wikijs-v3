@@ -36,6 +36,13 @@
           <w-item-section side><w-icon name="la:arrow-up" color="white" /></w-item-section>
           <w-item-section class="text-white">{{ t('navEdit.goUp') }}</w-item-section>
         </w-item>
+        <!-- -> Fork: the folder's landing page, as a menu opened from its item lists it above -->
+        <w-item v-if="landingOpener" :to="pageHref(landingOpener.targetPage)">
+          <w-item-section side><w-icon :name="landingOpener.icon" color="white" /></w-item-section>
+          <w-item-section class="wrap-anywhere text-white">{{
+            landingOpener.label
+          }}</w-item-section>
+        </w-item>
         <w-separator dark />
       </template>
       <template v-for="item of siteStore.nav.items" :key="item.id">
@@ -223,6 +230,15 @@ const parentHref = computed(() => {
   }
   const prefix = siteStore.localeUrlPrefix(parent.locale)
   return parent.path ? `${prefix}/${parent.path}` : prefix || '/'
+})
+
+/**
+ * Fork: the item leading into the menu on screen from its folder's landing page, while that menu is the
+ * page's own -- the landing page then listed under "Go up". The server's answer for this menu only.
+ */
+const landingOpener = computed(() => {
+  const { navId, opener } = siteStore.navParent
+  return navId === siteStore.nav.currentId ? opener : null
 })
 
 /**

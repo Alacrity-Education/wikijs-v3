@@ -262,7 +262,13 @@ export const useSiteStore = defineStore('site', {
     */
     navParent: {
       navId: null,
-      parent: null
+      parent: null,
+      /*
+        Fork: the `menu` item leading into that menu from its folder's landing page, as `nav.opener`
+        holds one -- listed under "Go up" on the folder's other pages, so the landing page is there
+        however the reader arrived
+      */
+      opener: null
     }
   }),
   getters: {
@@ -724,7 +730,7 @@ export const useSiteStore = defineStore('site', {
       }
       try {
         const resp = await API_CLIENT.get(`sites/${this.id}/navigation/${id}/parent`).json()
-        return { navId: id, parent: resp?.parent ?? null }
+        return { navId: id, parent: resp?.parent ?? null, opener: resp?.opener ?? null }
       } catch (err) {
         console.warn(err.message)
         return null

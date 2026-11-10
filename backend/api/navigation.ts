@@ -6,8 +6,31 @@ import {
   NAVIGATION_MODES,
   type NavigationItem,
   type NavigationMode,
-  type NavigationOwner
+  type NavigationOwner,
+  type NavigationTargetPage
 } from '../models/navigation.ts'
+
+/**
+ * What `getNav` is told to read a menu as this requester would see it: the items limited to their
+ * groups, folders holding nothing for them left out, and links only to pages they may be sent to -- a
+ * page that is not live only for whoever may see it so, as everywhere else.
+ */
+function readerNavOptions(req: FastifyRequest, siteId: string) {
+  const unpublished = unpublishedFor(req)
+  return {
+    userGroups: req.apiKey
+      ? req.apiKey.groupIds
+      : req.session?.authenticated
+        ? (req.session.groups ?? [])
+        : [],
+    hideAssetOnlyFolders: Boolean(WIKI.sites[siteId]?.config?.navigation?.hideAssetOnlyFolders),
+    actor: WIKI.models.groups.actorForRequest(req),
+    unpublished,
+    mayOpenPage: (page: NavigationTargetPage) =>
+      mayOnPage(req, 'read:pages', page) &&
+      (page.isLive || (unpublished !== false && unpublished(page)))
+  }
+}
 
 /**
  * Whether this requester may manage the navigation of the page or folder at `pageId`.
@@ -360,23 +383,9 @@ async function routes(app: FastifyInstance) {
           )
         }
       }
-      // -> A page that is not live is linked to only for whoever may see it so, as everywhere else
-      const unpublished = unpublishedFor(req)
       return WIKI.models.navigation.getNav(req.params.siteId, req.params.navId, {
-        userGroups: req.apiKey
-          ? req.apiKey.groupIds
-          : req.session?.authenticated
-            ? (req.session.groups ?? [])
-            : [],
-        unfiltered,
-        hideAssetOnlyFolders: Boolean(
-          WIKI.sites[req.params.siteId]?.config?.navigation?.hideAssetOnlyFolders
-        ),
-        actor: WIKI.models.groups.actorForRequest(req),
-        unpublished,
-        mayOpenPage: (page) =>
-          mayOnPage(req, 'read:pages', page) &&
-          (page.isLive || (unpublished !== false && unpublished(page)))
+        ...readerNavOptions(req, req.params.siteId),
+        unfiltered
       })
     }
   )
@@ -421,6 +430,16 @@ async function routes(app: FastifyInstance) {
                     description: "Slash path of the parent. Empty for the locale's root."
                   }
                 }
+              },
+              opener: {
+                type: ['object', 'null'],
+                description:
+                  "Fork: the `menu` item that opens this menu from the menu of the page at its location — a folder's landing page — when it links to that page and the requester may be sent there. What the sidebar lists that page with. Null otherwise.",
+                properties: {
+                  label: { type: 'string' },
+                  icon: { type: 'string' },
+                  targetPage: { type: 'string' }
+                }
               }
             }
           }
@@ -428,13 +447,30 @@ async function routes(app: FastifyInstance) {
       }
     },
     async (req) => {
-      const parent = await WIKI.models.navigation.menuParent(req.params.siteId, req.params.navId)
+      const { siteId, navId } = req.params
+      const parent = await WIKI.models.navigation.menuParent(siteId, navId)
       // -> The root of a locale always answers, as the site root does; anything else is a link only
       //    for whoever may read what is there
-      if (parent?.path && !mayOnPage(req, 'read:pages', { siteId: req.params.siteId, ...parent })) {
-        return { parent: null }
+      const readable = !parent?.path || mayOnPage(req, 'read:pages', { siteId, ...parent })
+      /*
+        Fork: the `menu` item leading here from the menu of the page at this menu's location -- a
+        folder's landing page -- read as this reader reads that menu, so it is there only with a page
+        they may be sent to. The same item the reader would have opened this menu from.
+      */
+      const landingNavId = await WIKI.models.navigation.landingNavId(siteId, navId)
+      // -> `targetPage` is set by `getNav` on a reader's copy of a menu, not part of a stored item
+      const items: (NavigationItem & { targetPage?: string })[] = landingNavId
+        ? await WIKI.models.navigation.getNav(siteId, landingNavId, readerNavOptions(req, siteId))
+        : []
+      const opener = items.find(
+        (item) => item.type === 'menu' && item.targetNavId === navId && item.targetPage
+      )
+      return {
+        parent: readable ? parent : null,
+        opener: opener
+          ? { label: opener.label, icon: opener.icon, targetPage: opener.targetPage }
+          : null
       }
-      return { parent }
     }
   )
 
