@@ -7,19 +7,19 @@
  */
 
 /**
- * The `diagram` fence around a line, if any: `{ startLine, endLine, svg }`, with `svg` the drawing the
- * fence's base64 body decodes to (null when the body is not base64 of UTF-8 text).
+ * Every closed `diagram` fence in the source: `{ startLine, endLine, body }`, the opener's and the
+ * closer's lines (1-based, as the editor counts) and the base64 between them with its whitespace taken
+ * out -- line breaks are whitespace too.
  *
  * Walked from the top of the source, tracking fences the way a renderer reads them, so that a `diagram`
  * opener inside some other fence is text and a closer is matched to the opener it belongs to. A fence
- * that is never closed does not count: there is no end to replace.
+ * that is never closed does not count: there is no end to it.
  *
  * @param {string[]} lines The page source, split into lines.
- * @param {number} lineNumber 1-based, as the editor counts.
- * @returns {{ startLine: number, endLine: number, svg: string|null }|null} The opener's and the
- *          closer's lines, 1-based, to be handed straight to the editor.
+ * @returns {Array<{ startLine: number, endLine: number, body: string }>} By opening line.
  */
-export function diagramFenceAt(lines, lineNumber) {
+export function findDiagramFences(lines) {
+  const fences = []
   let open = null
   for (let line = 1; line <= lines.length; line++) {
     const text = lines[line - 1]
@@ -35,24 +35,60 @@ export function diagramFenceAt(lines, lineNumber) {
         }
       }
     } else if (new RegExp(`^ {0,3}\\${open.mark}{${open.ticks},}\\s*$`).test(text)) {
-      if (open.isDiagram && open.line <= lineNumber && lineNumber <= line) {
-        // -> The lines between opener and closer, as one string: line breaks are whitespace too
-        const body = lines
-          .slice(open.line, line - 1)
-          .join('')
-          .replace(/\s+/g, '')
-        let svg = null
-        try {
-          svg = base64ToText(body)
-        } catch {
-          // -> Left null: the caller says so rather than opening an empty drawing over it
-        }
-        return { startLine: open.line, endLine: line, svg }
+      if (open.isDiagram) {
+        fences.push({
+          startLine: open.line,
+          endLine: line,
+          body: lines
+            .slice(open.line, line - 1)
+            .join('')
+            .replace(/\s+/g, '')
+        })
       }
       open = null
     }
   }
-  return null
+  return fences
+}
+
+/**
+ * The `diagram` fence around a line, if any: `{ startLine, endLine, svg }`, with `svg` the drawing the
+ * fence's base64 body decodes to (null when the body is not base64 of UTF-8 text). See
+ * `findDiagramFences` for which fences count.
+ *
+ * @param {string[]} lines The page source, split into lines.
+ * @param {number} lineNumber 1-based, as the editor counts.
+ * @returns {{ startLine: number, endLine: number, svg: string|null }|null} The opener's and the
+ *          closer's lines, 1-based, to be handed straight to the editor.
+ */
+export function diagramFenceAt(lines, lineNumber) {
+  const fence = findDiagramFences(lines).find(
+    (entry) => entry.startLine <= lineNumber && lineNumber <= entry.endLine
+  )
+  if (!fence) {
+    return null
+  }
+  let svg = null
+  try {
+    svg = base64ToText(fence.body)
+  } catch {
+    // -> Left null: the caller says so rather than opening an empty drawing over it
+  }
+  return { startLine: fence.startLine, endLine: fence.endLine, svg }
+}
+
+/**
+ * Where every `diagram` fence's body runs, for the editor to fold it away: `start` the opener and
+ * `end` the line before the closer, as Monaco reads a folding range, so a folded fence shows its two
+ * fence lines and nothing of the base64 between them. One with nothing between them has nothing to hide.
+ *
+ * @param {string} text The page source.
+ * @returns {Array<{ start: number, end: number }>} 1-based, by opening line.
+ */
+export function findDiagramFenceRegions(text) {
+  return findDiagramFences(text.split('\n'))
+    .filter((fence) => fence.endLine - fence.startLine > 1)
+    .map((fence) => ({ start: fence.startLine, end: fence.endLine - 1 }))
 }
 
 /** Base64 of UTF-8 bytes, to text. `atob` alone gives one character per byte. */

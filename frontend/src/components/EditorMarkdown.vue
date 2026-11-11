@@ -414,6 +414,7 @@ import {
   stopCollabSession
 } from '@/composables/collab'
 import { useDiagramFenceEditing } from '@/composables/diagramFenceEditing'
+import { findDiagramFenceRegions } from '@/helpers/diagramFences'
 import { dialog } from '@/composables/dialog'
 import { useEditorPanes } from '@/composables/editorPanes'
 import { usePreviewScrollSync } from '@/composables/previewScrollSync'
@@ -600,12 +601,16 @@ const HEADER_ICONS = [
   'mdi:format-header-6'
 ]
 
-/** Every block foldable from the gutter, a drawing folded from the start. See `useBlockFolding`. */
+/**
+ * Every block foldable from the gutter, a drawing folded from the start -- a `diagram` fence's base64
+ * as well as a block's body. See `useBlockFolding`.
+ */
 const blockFolding = useBlockFolding({
   getEditor: () => editor,
   languageId: 'markdown',
   findBlockRegions,
-  blockDefinition
+  blockDefinition,
+  findDrawingRegions: findDiagramFenceRegions
 })
 
 /** The "Image Properties" lens, over every image in the source. See `useImagePropertiesLens`. */
@@ -650,7 +655,10 @@ const tableCellNavigation = useTableCellNavigation({
 })
 
 // -> Insert Diagram: a draw.io drawing in a `diagram` fence, drawn in an overlay
-const { insertDiagram } = useDiagramFenceEditing({ getEditor: () => editor })
+const { insertDiagram } = useDiagramFenceEditing({
+  getEditor: () => editor,
+  refold: (line) => blockFolding.refoldCanvasBlock(line)
+})
 
 /** The preview and the Contents pane, remembered per browser. See `useEditorPanes`. */
 const { panes, contentsShown, contentsLaidOut, contentsLeft, contentsClosed } = useEditorPanes()

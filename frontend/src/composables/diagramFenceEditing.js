@@ -16,12 +16,17 @@ import EditorDiagramOverlay from '@/components/EditorDiagramOverlay.vue'
  * is replaced; anywhere else it draws a new one and the fence is inserted at the caret, on lines of
  * its own.
  *
+ * Either way the fence is folded back up once written -- the base64 is not for reading -- when the
+ * editor hands in `refold`, which is `useBlockFolding`'s `refoldCanvasBlock`.
+ *
  * Call it during `setup`, for the i18n; `insertDiagram` itself needs the editor to exist.
  *
  * @param {object} opts
  * @param {() => object} opts.getEditor The Monaco editor, once there is one.
+ * @param {(line: number) => boolean} [opts.refold] Fold the drawing whose body holds `line`, putting
+ *        the caret on its opening line; false when it did not.
  */
-export function useDiagramFenceEditing({ getEditor }) {
+export function useDiagramFenceEditing({ getEditor, refold = () => false }) {
   const { t } = useI18n()
 
   function insertDiagram() {
@@ -64,7 +69,9 @@ export function useDiagramFenceEditing({ getEditor }) {
             forceMoveMarkers: true
           }
         ])
-        editor.setPosition(new Position(target.startLine, 1))
+        if (!refold(target.startLine + 1)) {
+          editor.setPosition(new Position(target.startLine, 1))
+        }
       } else {
         const position = editor.getPosition() ?? cursor
         const before =
@@ -86,6 +93,8 @@ export function useDiagramFenceEditing({ getEditor }) {
             forceMoveMarkers: true
           }
         ])
+        // -> The base64 is the line after the opener, which `before` pushed down by two
+        refold(position.lineNumber + (before ? 2 : 0) + 1)
       }
       editor.focus()
     })
