@@ -414,6 +414,7 @@ import {
   stopCollabSession
 } from '@/composables/collab'
 import { useDiagramFenceEditing } from '@/composables/diagramFenceEditing'
+import { useDocumentWordCompletions } from '@/composables/documentWordCompletions'
 import { findDiagramFenceRegions } from '@/helpers/diagramFences'
 import { dialog } from '@/composables/dialog'
 import { useEditorPanes } from '@/composables/editorPanes'
@@ -652,6 +653,21 @@ const linkCompletions = useLinkCompletions({
 const tableCellNavigation = useTableCellNavigation({
   getEditor: () => editor,
   addRow: (line) => addTableRow(line)
+})
+
+/*
+  What a word is in Markdown, for the language configuration and word completion alike. Allows `*` in
+  it for quick styling (toggle bold/italic without selection); original
+  https://github.com/microsoft/vscode/blob/3e5c7e2c570a729e664253baceaf443b69e82da6/extensions/markdown-basics/language-configuration.json#L55
+*/
+const MARKDOWN_WORD_PATTERN =
+  /([*_]{1,2}|~~|`+)?[\p{Alphabetic}\p{Number}\p{Nonspacing_Mark}]+(_+[\p{Alphabetic}\p{Number}\p{Nonspacing_Mark}]+)*\1/gu
+
+// -> The words already in the page as it is typed, a drawing's base64 or XML not among them
+const wordCompletions = useDocumentWordCompletions({
+  getEditor: () => editor,
+  wordPattern: MARKDOWN_WORD_PATTERN,
+  excludedRegions: (text) => blockFolding.drawingRegions(text)
 })
 
 // -> Insert Diagram: a draw.io drawing in a `diagram` fence, drawn in an overlay
@@ -2072,12 +2088,8 @@ onMounted(async () => {
   //    provider set directly is used in place of the loader's factory, and replaces one it already made
   monaco.languages.setMonarchTokensProvider('markdown', markdownLanguageForTheme())
 
-  // Allow `*` in word pattern for quick styling (toggle bold/italic without selection)
-  // original https://github.com/microsoft/vscode/blob/3e5c7e2c570a729e664253baceaf443b69e82da6/extensions/markdown-basics/language-configuration.json#L55
-  monaco.languages.setLanguageConfiguration('markdown', {
-    wordPattern:
-      /([*_]{1,2}|~~|`+)?[\p{Alphabetic}\p{Number}\p{Nonspacing_Mark}]+(_+[\p{Alphabetic}\p{Number}\p{Nonspacing_Mark}]+)*\1/gu
-  })
+  // -> See `MARKDOWN_WORD_PATTERN`
+  monaco.languages.setLanguageConfiguration('markdown', { wordPattern: MARKDOWN_WORD_PATTERN })
 
   // -> Initialize Monaco Editor
   editor = monaco.editor.create(monacoRef.value, {
@@ -2199,6 +2211,7 @@ onMounted(async () => {
   fenceCompletions.register()
   tagCompletions.register()
   linkCompletions.register()
+  wordCompletions.register()
   tableCellNavigation.register()
 
   // -> "Image Properties" over every image in the page -- see `useImagePropertiesLens`
@@ -2469,6 +2482,7 @@ onBeforeUnmount(() => {
   fenceCompletions.dispose()
   tagCompletions.dispose()
   linkCompletions.dispose()
+  wordCompletions.dispose()
   tableCellNavigation.dispose()
   imageLens.dispose()
   blockFolding.dispose()

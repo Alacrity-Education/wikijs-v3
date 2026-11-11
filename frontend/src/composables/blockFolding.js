@@ -25,7 +25,8 @@ import { isCanvasBlock } from '@/helpers/blocks'
  *
  * Call `register()` once the editor exists, `foldCanvasBlocks()` once it holds the page -- again after
  * a collaborative session has replaced the text, which unfolds everything -- `refoldCanvasBlock()` when
- * a content editor has written a drawing back, and `dispose()` with the editor.
+ * a content editor has written a drawing back, and `dispose()` with the editor. `drawingRegions(text)`
+ * says where the drawings are, for anything else that has to leave them out.
  *
  * @param {object} opts
  * @param {() => object} opts.getEditor The Monaco editor, once there is one.
@@ -75,7 +76,10 @@ export function useBlockFolding({
     provider = null
   }
 
-  /** Every drawing in the source, a block's body or otherwise: what starts folded. */
+  /**
+   * Every drawing in the source, a block's body or otherwise: what starts folded, and what word
+   * completion leaves out (`useDocumentWordCompletions`).
+   */
   function drawingRegions(text) {
     return [
       ...findBlockRegions(text).filter((region) => isCanvasBlock(blockDefinition(region.block))),
@@ -139,5 +143,5 @@ export function useBlockFolding({
     return true
   }
 
-  return { register, dispose, foldCanvasBlocks, refoldCanvasBlock }
+  return { register, dispose, foldCanvasBlocks, refoldCanvasBlock, drawingRegions }
 }
