@@ -353,6 +353,7 @@ import { dialog } from '@/composables/dialog'
 import { useEditorPanes } from '@/composables/editorPanes'
 import { usePreviewScrollSync } from '@/composables/previewScrollSync'
 import { useBlockFolding } from '@/composables/blockFolding'
+import { useDocumentWordCompletions } from '@/composables/documentWordCompletions'
 import { useImagePropertiesLens } from '@/composables/imagePropertiesLens'
 import { notify } from '@/composables/notify'
 import { assetPath } from '@/helpers/assets'
@@ -370,7 +371,11 @@ import {
   writeBlockContent
 } from '@/helpers/asciidocBlocks'
 import { findImages, imageValues, writeImage } from '@/helpers/asciidocImages'
-import { ASCIIDOC_LANGUAGE_ID, registerAsciidocLanguage } from '@/helpers/monacoAsciidoc'
+import {
+  ASCIIDOC_LANGUAGE_ID,
+  ASCIIDOC_WORD_PATTERN,
+  registerAsciidocLanguage
+} from '@/helpers/monacoAsciidoc'
 
 import EditorCodeBlockMenu from '@/components/EditorCodeBlockMenu.vue'
 import EditorContentsPane from '@/components/EditorContentsPane.vue'
@@ -483,6 +488,13 @@ const blockFolding = useBlockFolding({
   languageId: ASCIIDOC_LANGUAGE_ID,
   findBlockRegions,
   blockDefinition
+})
+
+// -> The words already in the page as it is typed, a drawing's XML not among them
+const wordCompletions = useDocumentWordCompletions({
+  getEditor: () => editor,
+  wordPattern: ASCIIDOC_WORD_PATTERN,
+  excludedRegions: (text) => blockFolding.drawingRegions(text)
 })
 
 /** The "Image Properties" lens, over every image in the source. See `useImagePropertiesLens`. */
@@ -1599,6 +1611,7 @@ onMounted(async () => {
 
   // -> Block names and parameters as they are typed -- see `useBlockCompletions`
   blockCompletions.register()
+  wordCompletions.register()
 
   // -> "Image Properties" over every image in the page -- see `useImagePropertiesLens`
   imageLens.register()
@@ -1802,6 +1815,7 @@ onBeforeUnmount(() => {
   // -> Registered against the language, not this editor, so nothing else takes it down
   blockLensProvider?.dispose()
   blockCompletions.dispose()
+  wordCompletions.dispose()
   imageLens.dispose()
   blockFolding.dispose()
   // -> Before the editor goes: the binding is holding the model, and leaving the room is what takes

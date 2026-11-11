@@ -23,6 +23,15 @@ export const ASCIIDOC_LANGUAGE_ID = 'asciidoc'
 
 let registered = false
 
+/*
+  What a word is in AsciiDoc, for the language configuration and word completion alike. The formatting
+  marks are part of a word, so that toggling bold or italic with nothing selected takes the marks off
+  again instead of wrapping them a second time — the same reason the markdown editor widens Monaco's
+  default pattern. AsciiDoc's marks are `*`, `_`, `` ` ``, `#`, `^` and `~`.
+*/
+export const ASCIIDOC_WORD_PATTERN =
+  /([*_`#^~]{1,2})?[\p{Alphabetic}\p{Number}\p{Nonspacing_Mark}]+(_+[\p{Alphabetic}\p{Number}\p{Nonspacing_Mark}]+)*\1/gu
+
 /**
  * The verbatim delimiters, each of which suspends AsciiDoc entirely until its own closing line.
  *
@@ -68,13 +77,7 @@ export function registerAsciidocLanguage() {
       { open: '"', close: '"' },
       { open: '`', close: '`' }
     ],
-    /*
-      The formatting marks are part of a word, so that toggling bold or italic with nothing selected
-      takes the marks off again instead of wrapping them a second time — the same reason the markdown
-      editor widens Monaco's default pattern. AsciiDoc's marks are `*`, `_`, `` ` ``, `#`, `^` and `~`.
-    */
-    wordPattern:
-      /([*_`#^~]{1,2})?[\p{Alphabetic}\p{Number}\p{Nonspacing_Mark}]+(_+[\p{Alphabetic}\p{Number}\p{Nonspacing_Mark}]+)*\1/gu
+    wordPattern: ASCIIDOC_WORD_PATTERN
   })
 
   monaco.languages.setMonarchTokensProvider(ASCIIDOC_LANGUAGE_ID, {
