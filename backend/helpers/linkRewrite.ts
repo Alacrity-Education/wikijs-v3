@@ -89,8 +89,11 @@ const ADOC_VERBATIM = /^(-{4,}|\.{4,}|\/{4,})[ \t]*$/
  *
  * Line by line for the blocks, and within a markdown line for inline code spans — a backtick run
  * closes only on a run of the same length, which is the rule markdown itself uses.
+ *
+ * The stretches are the whole source, in order and unaltered, so their lengths add up to offsets into
+ * it — which is what `helpers/assetUsages.ts` reads them for.
  */
-function segments(source: string, syntax: SourceSyntax): { text: string; code: boolean }[] {
+export function segments(source: string, syntax: SourceSyntax): { text: string; code: boolean }[] {
   const out: { text: string; code: boolean }[] = []
   const push = (text: string, code: boolean) => {
     const last = out.at(-1)

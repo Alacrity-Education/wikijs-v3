@@ -205,6 +205,68 @@ export const assets = pgTable(
   (table) => [index('assets_siteId_idx').on(table.siteId)]
 )
 
+// ASSET USAGES ------------------------
+/**
+ * One row per place a page's source refers to an uploaded file: which file, which page, and exactly
+ * where in the page the reference is written -- see `models/assetUsages.ts`.
+ *
+ * A derived index, rebuilt wholesale by the `rescanAssetUsages` job (every three hours, and on demand
+ * from the file manager): a site's rows are replaced in one transaction, so a reader sees one scan or
+ * the next and never half of one. Nothing else writes here, and nothing is lost by emptying it.
+ *
+ * **Where is a range in the page's `content`**, the source the editor shows: offsets for code that
+ * slices the text, and 1-based lines and columns for an editor to jump to and highlight. Both count
+ * UTF-16 code units, which is what JavaScript strings and Monaco both count.
+ *
+ * **The path is stored as well as the file.** A reference names a path, and one to a path nothing is
+ * at -- a file deleted, renamed, or never uploaded -- is a row with no `assetId`, which is how a broken
+ * reference is found.
+ */
+export const assetUsages = pgTable(
+  'assetUsages',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    /**
+     * How the reference is written: `image` (a markdown or asciidoc picture), `link` (a link to the
+     * file), `html` (an `src` or `href` written as HTML), `block` (a block's attribute) or `url` (a
+     * `/_files/` address standing on its own). A varchar rather than an enum, as `pageLinks.kind` is.
+     */
+    kind: varchar({ length: 16 }).notNull(),
+    /** The address exactly as written, which is what an editor has to find again. */
+    raw: text().notNull(),
+    /** The file path it resolves to, below `/_files/`: lowercased and decoded, as the tree keys it. */
+    targetPath: text().notNull(),
+    // -> Character offsets into `content`, end exclusive
+    startOffset: integer().notNull(),
+    endOffset: integer().notNull(),
+    // -> The same range, 1-based, for an editor
+    startLine: integer().notNull(),
+    startColumn: integer().notNull(),
+    endLine: integer().notNull(),
+    endColumn: integer().notNull(),
+    /** When the scan that found it ran. */
+    createdAt: timestamp().notNull().defaultNow(),
+    // -> Null when nothing is at `targetPath`: a broken reference. The row outlives its file for that
+    //    reason, and is set loose rather than deleted when the file goes
+    assetId: uuid().references(() => assets.id, { onDelete: 'set null' }),
+    // -> The page it is written on. Its rows go with it
+    pageId: uuid()
+      .notNull()
+      .references(() => pages.id, { onDelete: 'cascade' }),
+    siteId: uuid()
+      .notNull()
+      .references(() => sites.id, { onDelete: 'cascade' })
+  },
+  (table) => [
+    // -> "Where is this file used", the question the file manager asks
+    index('assetUsages_assetId_idx').on(table.assetId),
+    // -> Every reference on one page, which is also how a page's rows are found
+    index('assetUsages_pageId_idx').on(table.pageId),
+    // -> A site's rows, which is what a rescan replaces; and the broken ones among them, by path
+    index('assetUsages_siteId_targetPath_idx').on(table.siteId, table.targetPath)
+  ]
+)
+
 // AUDIT LOG ---------------------------
 /**
  * What somebody did, one row per action.

@@ -3,6 +3,7 @@ import { isEqual } from 'es-toolkit/predicate'
 import { validate as uuidValidate } from 'uuid'
 
 import { audit } from '../helpers/audit.ts'
+import { maySeeUnpublished } from '../helpers/publishing.ts'
 import { requestUserId } from '../helpers/requester.ts'
 import { attachmentDisposition, decodeTreePath, normalizeFolderPath } from '../helpers/common.ts'
 import { isImageEditingAvailable, NEUTRAL_ADJUST } from '../helpers/images.ts'
@@ -1008,6 +1009,188 @@ async function routes(app: FastifyInstance) {
       })
 
       return reply.code(204).send()
+    }
+  )
+
+  /**
+   * ASSET USAGE INDEX: status
+   */
+  app.get<{ Params: { siteId: string } }>(
+    '/sites/:siteId/asset-usages',
+    {
+      config: {
+        scope: 'assets'
+      },
+      /*
+        No route-level `permissions`: reading files is a page rule. Anybody who may read files
+        somewhere on the site may ask how fresh the index behind the file manager is.
+      */
+      schema: {
+        summary: 'Get the state of the asset usage index',
+        description:
+          'Whether a rescan of the index of where each file is used is queued or running, and when the last one completed. The index is rebuilt every three hours, and on demand.',
+        tags: ['Assets'],
+        params: {
+          type: 'object',
+          properties: { siteId: { type: 'string', format: 'uuid' } },
+          required: ['siteId']
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              isRunning: { type: 'boolean' },
+              lastScanAt: { type: 'string', format: 'date-time', nullable: true }
+            }
+          }
+        }
+      }
+    },
+    async (req, reply) => {
+      const actor = WIKI.models.groups.actorForRequest(req)
+      if (!WIKI.models.groups.grantsAnywhere(actor, 'read:assets', req.params.siteId)) {
+        return reply.forbidden('You are not allowed to read files on this site.')
+      }
+      return WIKI.models.assetUsages.status()
+    }
+  )
+
+  /**
+   * ASSET USAGE INDEX: rescan
+   */
+  app.post<{ Params: { siteId: string } }>(
+    '/sites/:siteId/asset-usages/rescan',
+    {
+      config: {
+        scope: 'assets'
+      },
+      /*
+        No route-level `permissions`: managing files is a page rule. Whoever manages files somewhere on
+        the site may ask for the index to be brought up to date -- it changes nothing but the index.
+      */
+      schema: {
+        summary: 'Rescan the asset usage index',
+        description:
+          'Queues a rebuild of the index of where each file is used, unless one is already queued or running. Runs in a worker thread; poll `GET /sites/{siteId}/asset-usages` to learn when it has finished.',
+        tags: ['Assets'],
+        params: {
+          type: 'object',
+          properties: { siteId: { type: 'string', format: 'uuid' } },
+          required: ['siteId']
+        },
+        response: {
+          202: {
+            type: 'object',
+            properties: {
+              ok: { type: 'boolean' },
+              queued: {
+                type: 'boolean',
+                description:
+                  'False when a rescan was already queued or running, and none was added.'
+              }
+            }
+          }
+        }
+      }
+    },
+    async (req, reply) => {
+      const actor = WIKI.models.groups.actorForRequest(req)
+      if (!WIKI.models.groups.grantsAnywhere(actor, 'manage:assets', req.params.siteId)) {
+        return reply.forbidden('You are not allowed to manage files on this site.')
+      }
+      const queued = await WIKI.models.assetUsages.queueRescan()
+      return reply.code(202).send({ ok: true, queued })
+    }
+  )
+
+  /**
+   * ASSET USAGES: where one file is used
+   */
+  app.get<{ Params: { siteId: string; assetId: string } }>(
+    '/sites/:siteId/assets/:assetId/usages',
+    {
+      config: {
+        scope: 'assets'
+      },
+      /*
+        No route-level `permissions`: asset permissions come from a group's RULES, which address the
+        folder the file is in. Checked below -- and each page listed is checked too, since its path
+        and title are the page's to reveal, not the file's.
+      */
+      schema: {
+        summary: 'List where an asset is used',
+        description:
+          "Every place a page's source refers to this file, as of the last rescan of the asset usage index: the page, how the reference is written, and its range in the source (1-based lines and columns). Only pages the caller may read are listed; `hiddenCount` says how many others refer to it.",
+        tags: ['Assets'],
+        params: assetIdParam,
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              usages: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    pageId: { type: 'string', format: 'uuid' },
+                    locale: { type: 'string' },
+                    path: { type: 'string' },
+                    title: { type: 'string' },
+                    kind: { type: 'string', enum: ['image', 'link', 'html', 'block', 'url'] },
+                    raw: { type: 'string' },
+                    startLine: { type: 'integer' },
+                    startColumn: { type: 'integer' },
+                    endLine: { type: 'integer' },
+                    endColumn: { type: 'integer' }
+                  }
+                }
+              },
+              hiddenCount: { type: 'integer' },
+              lastScanAt: { type: 'string', format: 'date-time', nullable: true }
+            }
+          }
+        }
+      }
+    },
+    async (req, reply) => {
+      const asset = await WIKI.models.assets.getAsset(req.params.siteId, req.params.assetId)
+      if (!asset) {
+        return reply.notFound('This asset does not exist.')
+      }
+      if (!mayOnAsset(req, 'read:assets', asset)) {
+        return reply.forbidden('You are not allowed to read this file.')
+      }
+      const actor = WIKI.models.groups.actorForRequest(req)
+      const all = await WIKI.models.assetUsages.usagesOf(req.params.siteId, req.params.assetId)
+      const usages = all.filter((usage) => {
+        const page = {
+          siteId: req.params.siteId,
+          path: usage.path,
+          locale: usage.locale,
+          tags: usage.tags
+        }
+        return (
+          WIKI.models.groups.checkAccess(actor, 'read:pages', page) &&
+          (usage.isLive || maySeeUnpublished(actor, page))
+        )
+      })
+      const { lastScanAt } = await WIKI.models.assetUsages.status()
+      return {
+        usages: usages.map((usage) => ({
+          pageId: usage.pageId,
+          locale: usage.locale,
+          path: usage.path,
+          title: usage.title,
+          kind: usage.kind,
+          raw: usage.raw,
+          startLine: usage.startLine,
+          startColumn: usage.startColumn,
+          endLine: usage.endLine,
+          endColumn: usage.endColumn
+        })),
+        hiddenCount: all.length - usages.length,
+        lastScanAt
+      }
     }
   )
 }

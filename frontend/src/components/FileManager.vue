@@ -232,6 +232,48 @@
                 </div>
                 <span v-else>{{ item.value }}</span>
               </div>
+              <!--
+                Where the file is used, from the asset usage index: each page referring to it, and the
+                line and column of every reference in the page's source. As of the last scan, which
+                the caption says -- a page saved since shows up at the next one.
+              -->
+              <div v-if="state.usages" class="fileman-details-row fileman-usages">
+                <label>{{ t('fileman.usages.title') }}</label>
+                <span v-if="usageGroups.length < 1">{{
+                  state.usageIndex.lastScanAt ? t('fileman.usages.none') : t('fileman.usages.never')
+                }}</span>
+                <ul v-else class="fileman-usages-list">
+                  <li v-for="group of usageGroups" :key="group.pageId">
+                    <a :href="usagePageUrl(group)" @click.prevent="openUsagePage(group)">{{
+                      group.title || group.path
+                    }}</a>
+                    <span
+                      v-for="(usage, idx) of group.refs"
+                      :key="idx"
+                      class="fileman-usages-pos"
+                      :title="usage.raw">
+                      {{
+                        t('fileman.usages.position', {
+                          line: usage.startLine,
+                          column: usage.startColumn
+                        })
+                      }}
+                      · {{ t(`fileman.usages.kind.${usage.kind}`) }}
+                    </span>
+                  </li>
+                </ul>
+                <!-- -> Divs, not spans: the row's own value is its `> span`, styled as one -->
+                <div v-if="state.usagesHidden > 0" class="fileman-usages-note">
+                  {{ t('fileman.usages.hidden', { count: state.usagesHidden }) }}
+                </div>
+                <div v-if="state.usageIndex.lastScanAt" class="fileman-usages-note">
+                  {{
+                    t('fileman.usages.lastScan', {
+                      date: formatDateTime(state.usageIndex.lastScanAt)
+                    })
+                  }}
+                </div>
+              </div>
               <template v-if="insertMode">
                 <w-separator class="my-4" />
                 <w-btn
@@ -422,6 +464,25 @@
               <w-tooltip anchor="bottom middle" self="top middle">{{
                 t(`common.actions.refresh`)
               }}</w-tooltip>
+            </w-btn>
+            <!--
+              Rebuilds the index of where each file is used, which the details pane lists. Spinning for
+              as long as a scan is queued or running -- this reader's or the scheduled one -- since
+              that is when the list it feeds is about to change. `can` answers "somewhere", which is
+              exactly what the route asks.
+            -->
+            <w-btn
+              v-if="userStore.can(`manage:assets`)"
+              class="mr-2"
+              flat
+              dense
+              no-caps
+              color="grey"
+              :aria-label="t(`fileman.usages.rescan`)"
+              icon="la:sync-alt"
+              :loading="state.usageIndex.isRunning"
+              @click="rescanUsages">
+              <w-tooltip anchor="bottom middle" self="top middle">{{ rescanTooltip }}</w-tooltip>
             </w-btn>
             <!-- -> New, Upload and Insert all act on the folder being listed, and the bin is not one -->
             <template v-if="!state.isRecycleBin">
@@ -968,7 +1029,15 @@ const state = reactive({
   /** The listing entry being dragged, from its `dragstart` to its `dragend`. */
   dragItem: null,
   /** The folder row in the listing a drag would drop into, which is what lights it up. */
-  dropFolderId: null
+  dropFolderId: null,
+  /** The asset usage index: whether a scan is queued or running, and when the last one finished. */
+  usageIndex: { isRunning: false, lastScanAt: null },
+  /** Whether this reader asked for the scan under way, which is what earns a word when it ends. */
+  usageRescanRequested: false,
+  /** Where the selected file is used, as the index says. Null when no file is selected, or unknown. */
+  usages: null,
+  /** How many more references are on pages this reader may not see. */
+  usagesHidden: 0
 })
 
 // -> Over the defaults just above, which is what the view falls back to on a first visit
@@ -1287,6 +1356,9 @@ watch(
   }
 )
 
+// -> Where the selected file is used, fetched afresh for each file picked
+watch(() => state.currentFileId, loadUsages)
+
 // METHODS
 
 /**
@@ -1308,6 +1380,121 @@ function dismissTreeOverlay(ev) {
 
 function close() {
   siteStore.overlay = null
+}
+
+// ASSET USAGES
+
+/** How often the index's state is asked for while a scan runs, in milliseconds. */
+const USAGE_POLL_INTERVAL = 2000
+
+let usagePollTimer = null
+
+/** The usages of the selected file, one entry per page with every reference on it. */
+const usageGroups = computed(() => {
+  const groups = []
+  for (const usage of state.usages ?? []) {
+    let group = groups.at(-1)
+    if (!group || group.pageId !== usage.pageId) {
+      group = {
+        pageId: usage.pageId,
+        locale: usage.locale,
+        path: usage.path,
+        title: usage.title,
+        refs: []
+      }
+      groups.push(group)
+    }
+    group.refs.push(usage)
+  }
+  return groups
+})
+
+/** The rescan button's tooltip: what it does, and how fresh the index is. */
+const rescanTooltip = computed(() => {
+  if (state.usageIndex.isRunning) {
+    return t('fileman.usages.rescanning')
+  }
+  return state.usageIndex.lastScanAt
+    ? `${t('fileman.usages.rescan')} (${t('fileman.usages.lastScan', {
+        date: formatDateTime(state.usageIndex.lastScanAt)
+      })})`
+    : t('fileman.usages.rescan')
+})
+
+/**
+ * Ask how the index stands, and keep asking while a scan is under way -- which is what keeps the
+ * button spinning, and what lets the list refresh itself the moment the scan is done.
+ */
+async function loadUsageStatus() {
+  clearTimeout(usagePollTimer)
+  try {
+    const status = await API_CLIENT.get(`sites/${siteStore.id}/asset-usages`).json()
+    const wasRunning = state.usageIndex.isRunning
+    state.usageIndex = status
+    if (status.isRunning) {
+      usagePollTimer = setTimeout(loadUsageStatus, USAGE_POLL_INTERVAL)
+    } else if (wasRunning) {
+      if (state.usageRescanRequested) {
+        state.usageRescanRequested = false
+        notify({ type: 'positive', message: t('fileman.usages.rescanDone') })
+      }
+      await loadUsages()
+    }
+  } catch {
+    // -> No file may be read on this site, so there is no index to show either: the button and the
+    //    list stay as they are
+  }
+}
+
+/** Queue a rescan of the index, and spin until it is done. */
+async function rescanUsages() {
+  state.usageIndex.isRunning = true
+  state.usageRescanRequested = true
+  try {
+    await API_CLIENT.post(`sites/${siteStore.id}/asset-usages/rescan`)
+    await loadUsageStatus()
+  } catch (err) {
+    state.usageIndex.isRunning = false
+    state.usageRescanRequested = false
+    notify({
+      type: 'negative',
+      message: t('fileman.usages.rescanFailed'),
+      caption: apiErrorMessage(err, 'An unexpected error occured.')
+    })
+  }
+}
+
+/** Where the selected file is used, or nothing when what is selected is not a file. */
+async function loadUsages() {
+  const item = state.fileList.find((f) => f.id === state.currentFileId)
+  if (!item || item.type !== 'asset') {
+    state.usages = null
+    return
+  }
+  try {
+    const resp = await API_CLIENT.get(`sites/${siteStore.id}/assets/${item.id}/usages`).json()
+    // -> Another file may have been picked while this one was asked about
+    if (state.currentFileId === item.id) {
+      state.usages = resp.usages
+      state.usagesHidden = resp.hiddenCount
+      state.usageIndex.lastScanAt = resp.lastScanAt
+    }
+  } catch {
+    if (state.currentFileId === item.id) {
+      state.usages = null
+    }
+  }
+}
+
+/** The address of a page a file is used on, in the locale it is written in. */
+function usagePageUrl(group) {
+  return `${siteStore.localeUrlPrefix(group.locale)}/${group.path}`
+}
+
+/** Go to a page the file is used on, leaving the file manager. */
+function openUsagePage(group) {
+  router.push(usagePageUrl(group))
+  close()
 }
 
 /**
@@ -2674,6 +2861,9 @@ function handleKeyPress(ev) {
 onMounted(async () => {
   window.addEventListener('keydown', handleKeyPress)
 
+  // -> Not awaited: the index's state only drives the rescan button, which can come in late
+  loadUsageStatus()
+
   /*
     The folder whoever opened the manager asked for -- the Image Properties dialog asks for the one the
     image is in -- and otherwise the folder of the page being viewed. Empty is the site root, which is
@@ -2711,6 +2901,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeyPress)
+  clearTimeout(usagePollTimer)
 })
 </script>
 
@@ -3134,6 +3325,38 @@ $fileman-bottom-row-height: 45px;
     & + .fileman-details-row {
       margin-top: 5px;
     }
+  }
+
+  // -> The "Used in" list: a page per item, its references under it in the caption size
+  &-usages-list {
+    margin: 2px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.85rem;
+
+    li + li {
+      margin-top: 6px;
+    }
+    a {
+      display: block;
+      color: $primary;
+      overflow-wrap: anywhere;
+    }
+  }
+  &-usages-pos,
+  &-usages-note {
+    display: block;
+    font-size: 0.75rem;
+
+    @at-root .body--light & {
+      color: $grey-6;
+    }
+    @at-root .body--dark & {
+      color: $blue-grey-4;
+    }
+  }
+  &-usages-note {
+    margin-top: 6px;
   }
 
   &-progressbar {

@@ -67,6 +67,9 @@ export const SYSTEM_SCHEDULE: SystemScheduleEntry[] = [
   { task: 'dispatchNotifications', cron: '*/5 * * * *' },
   { task: 'sendNotificationMail', cron: '*/5 * * * *' },
   { task: 'updateLocales', cron: '0 0 * * *' },
+  // -> Every three hours, off the hour: the index of where each file is used, which the file manager
+  //    shows. It is rebuilt whole each time, so a page saved in between shows up at the next run
+  { task: 'rescanAssetUsages', cron: '15 */3 * * *' },
   // -> Every minute, and the task decides which sites are actually due: the interval is a per-site
   //    setting, so the tick has to be as fine as the shortest one anybody can ask for
   { task: 'syncStorageTargets', cron: '* * * * *' }
