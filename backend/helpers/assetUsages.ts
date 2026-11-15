@@ -56,6 +56,12 @@ export interface ScanContext {
   pageExtensions: string[]
   /** Every hostname a site of this instance answers to, for addresses written as full URLs. */
   siteForHost: (hostname: string) => string | null
+  /**
+   * Whether the site is the catch-all `*`, which answers to any hostname no other site claims -- so a
+   * `/_files/` URL on such a host may well be this wiki under another name (a copy of production
+   * linking to production's address, a domain it used to have).
+   */
+  isCatchAll?: boolean
   /** The file at a path (as `targetPath` spells it) on the page's site, if there is one. */
   assetAt: (filePath: string) => string | null
 }
@@ -116,11 +122,15 @@ function candidatesFor(
     } catch {
       return null
     }
-    if (ctx.siteForHost(url.hostname.toLowerCase()) !== ctx.siteId) {
+    const owner = ctx.siteForHost(url.hostname.toLowerCase())
+    // -> On the catch-all site, a host no other site claims counts too, but only where a file is
+    //    there to match: it may as well be another server, whose misses are not this wiki's
+    const unclaimed = owner === null && ctx.isCatchAll === true
+    if (owner !== ctx.siteId && !unclaimed) {
       return null
     }
     const path = filesPath(url.pathname)
-    return path ? { paths: [path], brokenIfMissing: true } : null
+    return path ? { paths: [path], brokenIfMissing: !unclaimed } : null
   }
 
   // -> The wiki's own routes: `/_files/` is the one that holds files, and is taken as written

@@ -132,6 +132,7 @@ export const assetUsages = {
               siteId: site.id,
               pageExtensions,
               siteForHost: (hostname) => hostSites.get(hostname) ?? null,
+              isCatchAll: site.hostname === '*',
               assetAt: (filePath) => files.get(filePath) ?? null
             })
             for (const ref of refs) {
