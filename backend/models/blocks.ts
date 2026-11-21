@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { blocks as blocksTable, sites as sitesTable } from '../db/schema.ts'
 import { CustomError } from '../helpers/common.ts'
 import { readBlockPackage } from '../helpers/wkblock.ts'
@@ -106,6 +106,15 @@ export interface BlockDefinition {
    * edited in the page like any other content.
    */
   contentEditor?: string
+  /**
+   * The child blocks a CUSTOM block brought in its package, as their own definitions, each `isChild`.
+   *
+   * In a component's source this names the children by key (`children: ['card']`), and the packager
+   * swaps the keys for the definitions; only a stored custom definition is read for it here. The
+   * children live on their parent's row — they are installed, served and deleted with it — and are
+   * allowed through the sanitiser and listed for the editor exactly as built-in children are.
+   */
+  children?: BlockDefinition[]
 }
 
 /** A block row as exposed by the API, with what its component says it can be given. */
@@ -163,12 +172,45 @@ export interface RenderableBlocks {
   /** The keys of the blocks this site has switched on. */
   enabled: Set<string>
   /**
-   * The definitions of this site's CUSTOM blocks, which are on nobody's disk to be read from.
+   * The definitions of this site's enabled CUSTOM blocks, which are on nobody's disk to be read from.
    *
    * Read in the same query as the keys above rather than from a cache, for the same reason that
    * query is not cached: a definition this misses is a block stripped out of somebody's page.
    */
   custom: BlockDefinition[]
+  /**
+   * The keys of every custom block on the site, enabled or not — the parents a custom child may sit
+   * in, which `unwrapOrphanedChildBlocks` asks about for the same reason it names every built-in.
+   */
+  customParents: string[]
+  /**
+   * The child blocks every custom block on the site brought, enabled or not: like a built-in child,
+   * one is always let through and then unwrapped if nothing holds it.
+   */
+  customChildren: BlockDefinition[]
+}
+
+/** A child block as listed by `getSiteBlocks`: no row, nothing to switch, never offered for inserting. */
+function childSiteBlock(definition: BlockDefinition, isCustom: boolean): SiteBlock {
+  return {
+    id: `child:${definition.block}`,
+    block: definition.block,
+    name: definition.name,
+    description: definition.description,
+    icon: definition.icon,
+    // -> Available exactly when whatever holds it is, which is not a question this row can answer
+    isEnabled: true,
+    isCustom,
+    config: {},
+    props: authorableProps(definition.props),
+    attributes: (definition.props ?? []).map((prop) => prop.name),
+    urlAttributes: (definition.props ?? []).filter((prop) => prop.url).map((prop) => prop.name),
+    template: definition.template ?? '',
+    asciidocTemplate: definition.asciidocTemplate ?? '',
+    contentEditor: definition.contentEditor ?? '',
+    isChild: true,
+    inline: definition.inline === true
+  }
 }
 
 const blockSelection = {
@@ -214,6 +256,14 @@ class Blocks {
    * other instances of an HA set find out.
    */
   private customIndex = new Map<string, Map<string, string>>()
+
+  /**
+   * Which custom block each custom CHILD block is served from, per site — `siteId` → child → parent.
+   *
+   * A child has no package of its own: `block-card.js` is a file of the unpacked `block-cards`
+   * package. Filled alongside `customIndex`, and only for a block that has a package to unpack.
+   */
+  private customChildIndex = new Map<string, Map<string, string>>()
 
   /**
    * The checksum this instance has already unpacked into the cache, keyed `siteId:block`.
@@ -367,6 +417,7 @@ class Blocks {
     }
 
     // -> A built-in that has been removed from disk should not linger in the admin list
+
     const orphaned = existing
       .map((entry: any) => entry.block)
       .filter((key: string) => !definedKeys.includes(key))
@@ -473,27 +524,14 @@ class Blocks {
     */
     const children = this.definitions
       .filter((definition) => definition.isChild)
-      .map((definition) => ({
-        id: `child:${definition.block}`,
-        block: definition.block,
-        name: definition.name,
-        description: definition.description,
-        icon: definition.icon,
-        // -> Available exactly when whatever holds it is, which is not a question this row can answer
-        isEnabled: true,
-        isCustom: false,
-        config: {},
-        props: authorableProps(definition.props),
-        attributes: (definition.props ?? []).map((prop) => prop.name),
-        urlAttributes: (definition.props ?? []).filter((prop) => prop.url).map((prop) => prop.name),
-        template: definition.template ?? '',
-        asciidocTemplate: definition.asciidocTemplate ?? '',
-        contentEditor: definition.contentEditor ?? '',
-        isChild: true,
-        inline: definition.inline === true
-      }))
+      .map((definition) => childSiteBlock(definition, false))
+    // -> A custom block's children came in its package and are on its row, read in the query above
+    const customChildren = (results as { isCustom: boolean; definition: BlockDefinition }[])
+      .filter((row) => row.isCustom)
+      .flatMap((row) => row.definition?.children ?? [])
+      .map((definition) => childSiteBlock(definition, true))
 
-    return [...listed, ...children]
+    return [...listed, ...children, ...customChildren]
   }
 
   /**
@@ -507,23 +545,33 @@ class Blocks {
    * query for exactly the same reason: a block imported a minute ago on another instance of an HA set
    * must not be stripped out of the first page saved after it.
    *
-   * Child blocks never appear: they have no row of their own, and follow the block they sit in.
+   * Child blocks never appear in `enabled`: they have no row of their own, and follow the block they
+   * sit in. A custom block's children are read off its row, enabled or not, as are the keys of every
+   * custom block — what holds them.
    */
   async getEnabledForRender(siteId: string): Promise<RenderableBlocks> {
     const rows = await WIKI.db
       .select({
         block: blocksTable.block,
+        isEnabled: blocksTable.isEnabled,
         isCustom: blocksTable.isCustom,
         definition: blocksTable.definition
       })
       .from(blocksTable)
-      .where(and(eq(blocksTable.siteId, siteId), eq(blocksTable.isEnabled, true)))
+      .where(eq(blocksTable.siteId, siteId))
+    const enabled = rows.filter((row) => row.isEnabled)
+    const customDefinitions = rows
+      .filter((row) => row.isCustom)
+      .map((row) => row.definition as BlockDefinition)
+      .filter((definition) => definition?.block)
     return {
-      enabled: new Set(rows.map((row) => row.block)),
-      custom: rows
+      enabled: new Set(enabled.map((row) => row.block)),
+      custom: enabled
         .filter((row) => row.isCustom)
         .map((row) => row.definition as BlockDefinition)
-        .filter((definition) => definition?.block)
+        .filter((definition) => definition?.block),
+      customParents: customDefinitions.map((definition) => definition.block),
+      customChildren: customDefinitions.flatMap((definition) => definition.children ?? [])
     }
   }
 
@@ -554,6 +602,8 @@ class Blocks {
 
   /**
    * Delete a custom block. Built-in blocks are rejected, since the next sync would recreate them.
+   *
+   * Its children go with it: they are part of its row, and of the package it unpacked from.
    *
    * @returns Whether a block was deleted
    */
@@ -589,29 +639,60 @@ class Blocks {
    * name — the three things that describe the block itself.
    *
    * The key is the identity. A package whose key is that of a built-in block is refused rather than
-   * shadowing it: the two would be served from the same URL, and one of them would silently win.
+   * shadowing it: the two would be served from the same URL, and one of them would silently win. The
+   * same goes for each child block the package brings, which is served under its own key — and for a
+   * key another custom block of this site already answers for, as itself or as one of its children.
+   *
+   * A custom row with no package yet — a built-in that moved into a package, left by the migration
+   * that took it out of the build — is upgraded like any other custom row, which is what keeps the
+   * site's choice to have it switched on.
    */
   async importPackage(siteId: string, data: Buffer): Promise<BlockImportResult> {
     const pkg = readBlockPackage(data)
+    const keys = [pkg.block, ...(pkg.definition.children ?? []).map((child) => child.block)]
 
-    if (this.definitions.some((definition) => definition.block === pkg.block)) {
+    const builtIn = keys.find((key) => this.definitions.some((d) => d.block === key))
+    if (builtIn) {
       throw new CustomError(
         'blockPackageConflict',
-        `This wiki already has a built-in block called "${pkg.block}", and both would be served from the same address. Rename the block and package it again.`,
+        `This wiki already has a built-in block called "${builtIn}", and both would be served from the same address. Rename the block and package it again.`,
         409
       )
     }
 
-    const [existing] = await WIKI.db
-      .select({ id: blocksTable.id, isCustom: blocksTable.isCustom })
+    const siteRows = await WIKI.db
+      .select({
+        id: blocksTable.id,
+        block: blocksTable.block,
+        isCustom: blocksTable.isCustom,
+        definition: blocksTable.definition
+      })
       .from(blocksTable)
-      .where(and(eq(blocksTable.siteId, siteId), eq(blocksTable.block, pkg.block)))
+      .where(eq(blocksTable.siteId, siteId))
+    const existing = siteRows.find((row) => row.block === pkg.block)
     if (existing && !existing.isCustom) {
       throw new CustomError(
         'blockPackageConflict',
         `This site already has a built-in block called "${pkg.block}".`,
         409
       )
+    }
+    for (const row of siteRows) {
+      if (row === existing) {
+        continue
+      }
+      const taken = [
+        row.block,
+        ...((row.definition as BlockDefinition)?.children ?? []).map((child) => child.block)
+      ]
+      const clash = keys.find((key) => taken.includes(key))
+      if (clash) {
+        throw new CustomError(
+          'blockPackageConflict',
+          `This site's block "${row.block}" already answers for "${clash}", and both would be served from the same address.`,
+          409
+        )
+      }
     }
 
     const checksum = crypto.createHash('sha256').update(data).digest('hex')
@@ -676,26 +757,41 @@ class Blocks {
       .select({
         siteId: blocksTable.siteId,
         block: blocksTable.block,
-        checksum: blocksTable.checksum
+        checksum: blocksTable.checksum,
+        // -> Only the children's keys, not the whole definition
+        children: sql<
+          string[] | null
+        >`jsonb_path_query_array(${blocksTable.definition}, '$.children[*].block')`
       })
       .from(blocksTable)
       .where(eq(blocksTable.isCustom, true))
     const index = new Map<string, Map<string, string>>()
+    const childIndex = new Map<string, Map<string, string>>()
     for (const row of rows) {
       const forSite = index.get(row.siteId) ?? new Map<string, string>()
       forSite.set(row.block, row.checksum)
       index.set(row.siteId, forSite)
+      if (row.checksum) {
+        const childrenForSite = childIndex.get(row.siteId) ?? new Map<string, string>()
+        for (const child of row.children ?? []) {
+          childrenForSite.set(child, row.block)
+        }
+        childIndex.set(row.siteId, childrenForSite)
+      }
     }
     this.customIndex = index
+    this.customChildIndex = childIndex
   }
 
   /**
    * The directory a custom block's files are served from, unpacking them first if need be.
    *
    * Null when this site has no custom block by that key, which is the ordinary answer — every request
-   * for a built-in block asks this first.
+   * for a built-in block asks this first. A custom CHILD block's key answers with its parent's
+   * directory, where its files were unpacked with the rest of the package.
    */
-  async servingPathFor(siteId: string, block: string): Promise<string | null> {
+  async servingPathFor(siteId: string, requested: string): Promise<string | null> {
+    const block = this.customChildIndex.get(siteId)?.get(requested) ?? requested
     const checksum = this.customIndex.get(siteId)?.get(block)
     if (!checksum) {
       return null

@@ -240,7 +240,7 @@ class Rendering {
     const $ = cheerio.load(clean, null, false)
 
     this.stripEditorArtifacts($)
-    this.unwrapOrphanedChildBlocks($)
+    this.unwrapOrphanedChildBlocks($, siteBlocks)
     this.liftIconChildren($)
     await this.inlineIcons($)
     const toc = this.anchorHeadings($)
@@ -274,10 +274,11 @@ class Rendering {
    * through here.
    *
    * Child blocks are exempt, having no switch of their own: a tab is part of the tabs it sits in,
-   * and is gated by `unwrapOrphanedChildBlocks` once the parent's fate is known.
+   * and is gated by `unwrapOrphanedChildBlocks` once the parent's fate is known. That includes the
+   * children a custom block brought in its package, whether or not that block is switched on.
    */
   private blockAllowances(siteBlocks: RenderableBlocks): SanitizableBlock[] {
-    return [...WIKI.models.blocks.definitions, ...siteBlocks.custom]
+    return [...WIKI.models.blocks.definitions, ...siteBlocks.custom, ...siteBlocks.customChildren]
       .filter((definition) => definition.isChild || siteBlocks.enabled.has(definition.block))
       .map((definition) => ({
         block: definition.block,
@@ -297,10 +298,16 @@ class Rendering {
    *
    * Unwrapped rather than deleted, which is what the sanitiser does to every other tag it refuses:
    * the element goes, the content the author wrote inside it stays.
+   *
+   * The site's custom blocks count on both sides: their children as children, and every one of them
+   * as a parent.
    */
-  private unwrapOrphanedChildBlocks($: cheerio.CheerioAPI): void {
+  private unwrapOrphanedChildBlocks($: cheerio.CheerioAPI, siteBlocks: RenderableBlocks): void {
     const definitions = WIKI.models.blocks.definitions
-    const childTags = definitions.filter((d) => d.isChild).map((d) => `block-${d.block}`)
+    const childTags = [
+      ...definitions.filter((d) => d.isChild).map((d) => `block-${d.block}`),
+      ...siteBlocks.customChildren.map((d) => `block-${d.block}`)
+    ]
     if (childTags.length < 1) {
       return
     }
@@ -309,7 +316,10 @@ class Rendering {
       be matched, and naming the full set keeps this a question about nesting rather than a second
       copy of the enabled-block rule that could disagree with the first.
     */
-    const parentTags = definitions.filter((d) => !d.isChild).map((d) => `block-${d.block}`)
+    const parentTags = [
+      ...definitions.filter((d) => !d.isChild).map((d) => `block-${d.block}`),
+      ...siteBlocks.customParents.map((key) => `block-${key}`)
+    ]
     $(childTags.join(',')).each((_, el) => {
       if (parentTags.length > 0 && $(el).parents(parentTags.join(',')).length > 0) {
         return

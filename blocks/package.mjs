@@ -23,9 +23,11 @@
  * reader can check a digest as it goes rather than after holding the whole package twice.
  *
  * **Everything is namespaced under the block's own name.** Every path is relative to where the block
- * is served from, and must be `block-<key>.js`, `block-<key>.worker.js` or `block-<key>/**`. That
- * namespace is the whole of what keeps an imported block from overwriting a built-in one, so it is
- * checked here as well as in the reader — here, where the author can still do something about it.
+ * is served from, and must be `block-<key>.js`, `block-<key>.worker.js` or `block-<key>/**` — or the
+ * same three for one of the child blocks the block declares in `children`, which are compiled into
+ * the same package because they cannot be installed on their own. That namespace is the whole of what
+ * keeps an imported block from overwriting a built-in one, so it is checked here as well as in the
+ * reader — here, where the author can still do something about it.
  */
 
 import crypto from 'node:crypto'
@@ -34,7 +36,7 @@ import path from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { rollup } from 'rollup'
 
-import { buildConfig } from './rollup.config.mjs'
+import { buildConfig, readStaticDefinition } from './rollup.config.mjs'
 
 const MAGIC = Buffer.from('WKBLOCK\0', 'latin1')
 const FORMAT_VERSION = 1
@@ -71,6 +73,46 @@ function resolveBlockDir (argument) {
   return candidate
 }
 
+/** The most children one block may bring, as the reader allows. */
+const MAX_CHILDREN = 16
+
+/**
+ * The child block directories a block declares in `children`, checked before anything is compiled.
+ *
+ * A child is a block in a directory of its own (`block-card/` for `children: ['card']`), which says
+ * `isChild` and names no children of its own: the package is installed, switched on and deleted as
+ * its one block, and a child is what rides along with it.
+ */
+function resolveChildDirs (blockDir, definition) {
+  const keys = definition.children ?? []
+  if (!Array.isArray(keys) || keys.length > MAX_CHILDREN || keys.some(key => typeof key !== 'string')) {
+    fail(`${blockDir} declares "children" as something other than a list of at most ${MAX_CHILDREN} block keys.`)
+  }
+  if (new Set(keys).size !== keys.length) {
+    fail(`${blockDir} names the same child twice.`)
+  }
+  return keys.map(key => {
+    const childDir = `block-${key}`
+    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(key) || childDir === blockDir) {
+      fail(`${blockDir} names "${key}" as a child, which is not a usable block key.`)
+    }
+    if (!fs.existsSync(path.join(childDir, 'component.js'))) {
+      fail(`${blockDir} names "${key}" as a child, but ${childDir}/component.js does not exist.`)
+    }
+    const child = readStaticDefinition(childDir)
+    if (child?.block !== key) {
+      fail(`${childDir} declares itself as "${child?.block}", and ${blockDir} names it "${key}". They have to match.`)
+    }
+    if (child.isChild !== true) {
+      fail(`${childDir} is named as a child of ${blockDir} but does not say "isChild: true".`)
+    }
+    if (child.children) {
+      fail(`${childDir} is a child block and names children of its own. Only the packaged block may.`)
+    }
+    return childDir
+  })
+}
+
 /** Every file under a directory, as paths relative to it, in a stable order. */
 function collectFiles (root) {
   return fs.readdirSync(root, { recursive: true, withFileTypes: true })
@@ -86,14 +128,15 @@ function collectFiles (root) {
  * there — so this is about a change to that config, or to a block's `assets.json`, quietly producing
  * a package that stands on a file the importing instance already has.
  */
-function assertNamespaced (files, blockDir) {
-  const allowed = [`${blockDir}.js`, `${blockDir}.worker.js`]
-  const stray = files.filter(file => !allowed.includes(file) && !file.startsWith(`${blockDir}/`))
+function assertNamespaced (files, dirs) {
+  const stray = files.filter(file => !dirs.some(dir =>
+    file === `${dir}.js` || file === `${dir}.worker.js` || file.startsWith(`${dir}/`)
+  ))
   if (stray.length > 0) {
     fail(
-      `The compile emitted ${stray.length} file(s) outside ${blockDir}'s namespace:\n` +
+      `The compile emitted ${stray.length} file(s) outside the namespace of ${dirs.join(', ')}:\n` +
       stray.map(file => `      ${file}`).join('\n') +
-      `\n\n    A package may only hold ${blockDir}.js, ${blockDir}.worker.js and ${blockDir}/**.`
+      `\n\n    A package may only hold <block>.js, <block>.worker.js and <block>/** for ${dirs.join(', ')}.`
     )
   }
 }
@@ -107,10 +150,24 @@ function formatSize (bytes) {
 async function main () {
   const blockDir = resolveBlockDir(process.argv[2])
 
+  // -> Read off the source first: the children it names decide what is compiled
+  const declared = readStaticDefinition(blockDir)
+  if (!declared) {
+    fail(`${blockDir}/component.js declares no "static definition" — there is nothing to package.`)
+  }
+  if (declared.isChild) {
+    fail(
+      `${blockDir} is a child block — it only ever appears inside another one, and has nothing to be\n` +
+      '    installed or switched on separately from it. Package the block that holds it instead.'
+    )
+  }
+  const childDirs = resolveChildDirs(blockDir, declared)
+  const dirs = [blockDir, ...childDirs]
+
   fs.rmSync(STAGING_DIR, { recursive: true, force: true })
 
-  console.log(`\n  Compiling ${blockDir}...\n`)
-  const config = buildConfig({ only: blockDir, outputDir: STAGING_DIR })
+  console.log(`\n  Compiling ${dirs.join(', ')}...\n`)
+  const config = buildConfig({ only: dirs, outputDir: STAGING_DIR })
   const bundle = await rollup(config)
   await bundle.write(config.output)
   await bundle.close()
@@ -119,30 +176,27 @@ async function main () {
 
   const manifestPath = path.join(STAGING_DIR, MANIFEST_FILE)
   const definitions = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-  if (definitions.length !== 1) {
-    fail(`${blockDir}/component.js declares no "static definition" — there is nothing to package.`)
-  }
-  const definition = definitions[0]
+  const definition = definitions.find(entry => `block-${entry.block}` === blockDir)
 
-  if (`block-${definition.block}` !== blockDir) {
+  if (!definition) {
     fail(
-      `${blockDir} declares itself as "${definition.block}", so it renders as <block-${definition.block}>.\n` +
+      `${blockDir} declares itself as "${declared.block}", so it renders as <block-${declared.block}>.\n` +
       `    The directory name and the key have to match: a package is served as block-<key>.js.`
     )
   }
-  if (definition.isChild) {
-    fail(
-      `${blockDir} is a child block — it only ever appears inside another one, and has nothing to be\n` +
-      '    installed or switched on separately from it. Package the block that holds it instead.'
-    )
+  // -> In the package, `children` carries the children's definitions rather than their keys
+  if (childDirs.length > 0) {
+    definition.children = childDirs.map(dir => definitions.find(entry => `block-${entry.block}` === dir))
   }
 
   // -- Everything the compile emitted, minus the manifest, which the package states for itself
 
   const files = collectFiles(STAGING_DIR).filter(file => file !== MANIFEST_FILE)
-  assertNamespaced(files, blockDir)
-  if (!files.includes(`${blockDir}.js`)) {
-    fail(`The compile produced no ${blockDir}.js, which is the file the wiki loads the block from.`)
+  assertNamespaced(files, dirs)
+  for (const dir of dirs) {
+    if (!files.includes(`${dir}.js`)) {
+      fail(`The compile produced no ${dir}.js, which is the file the wiki loads that block from.`)
+    }
   }
 
   const entries = []
@@ -180,6 +234,9 @@ async function main () {
 
   const uncompressed = entries.reduce((total, entry) => total + entry.size, 0)
   console.log(`  ${definition.name} — <block-${definition.block}>`)
+  for (const child of definition.children ?? []) {
+    console.log(`    with ${child.name} — <block-${child.block}>`)
+  }
   console.log(`  ${entries.length} file(s), ${formatSize(uncompressed)} uncompressed`)
   console.log(`\n  → ${packagePath} (${formatSize(fs.statSync(packagePath).size)})\n`)
   console.log('  Install it from Administration → Content Blocks → Install Block...\n')

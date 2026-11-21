@@ -32,13 +32,20 @@ written — so a change to the format is a change to the spec first, then both f
 - **One block per package, and the directory name is the identity.** `blocks/block-xyz/` declares
   `block: 'xyz'`, is packaged as `block-xyz.wkblock`, serves as `block-xyz.js` and renders as
   `<block-xyz>`. The packager refuses a mismatch, because every one of those names is derived from the
-  same key. A **child block** (`isChild`) is refused outright: it is part of whatever holds it, has no
-  row and nothing to switch on, so a package of one would install nothing.
+  same key. A **child block** (`isChild`) on its own is refused: it is part of whatever holds it, has
+  no row and nothing to switch on, so a package of one would install nothing. Instead it **travels
+  with its parent**: the parent names it in its `static definition` (`children: ['card']`), the
+  packager compiles `blocks/block-card/` into the parent's package and swaps the key for the child's
+  definition, and the child serves under its own namespace (`block-card.js`, `block-card/**`). The
+  importer stores the children on the parent's row and refuses (409) a package whose key or any
+  child's key is a built-in's or is already answered for by another custom block of the site.
 - **Everything is namespaced under the block's own name**, which is what lets an imported block and a
   built-in one be served from the same `/_blocks/` without either standing on the other. A package
   holds `block-xyz.js`, optionally `block-xyz.worker.js`, and `block-xyz/**` — the assets from its
   `assets.json` and, unlike the full build, its shared chunks, which `buildConfig({ only })` names
-  into that directory rather than leaving at the root. Both the packager and the importer check it.
+  into that directory rather than leaving at the root — the parent's directory, also for a chunk a
+  child shares with it. The namespace is widened to the declared children and nothing else. Both the
+  packager and the importer check it.
 - **The package is the only copy.** It is stored verbatim on the block's row (`packageData`) with its
   definition and a `checksum`. Nothing is written to `blocks/` on the server, which is a build output
   and in a container is part of the image.
@@ -59,7 +66,8 @@ plugin claims the whole prefix and leaves nothing to ask the question in front o
 still registered with `serve: false`, for `reply.sendFile`.
 
 - **The first path segment names the block, and that is the whole decision** — which is the reason the
-  namespace above is enforced.
+  namespace above is enforced. A custom child's key resolves to its parent (`customChildIndex`), so
+  `block-card.js` comes out of the site's unpacked `block-cards` package.
 - **It depends on which SITE was asked**, since a custom block belongs to one, and two sites on an
   instance may each have imported a different block under the same key. The frontend has no site in
   hand when it loads a block (it reads a tag out of the page and asks for it), so the hostname
@@ -78,4 +86,7 @@ its props in `getSiteBlocks`, and its tag and attributes in the sanitiser's allo
 (`getEnabledForRender`, which fetches both in the one query `postProcess` was already making, for the
 same reason that query is not cached: a definition this misses is a block stripped out of somebody's
 page). Everything else about it is identical, the enable toggle included: a custom block that is
-switched off is stripped from a page being saved exactly as a built-in one is.
+switched off is stripped from a page being saved exactly as a built-in one is. Its children are
+treated as built-in children: always allowed through the sanitiser, unwrapped by
+`unwrapOrphanedChildBlocks` when nothing holds them (custom blocks count as parents there), listed by
+`getSiteBlocks` with `isChild` so no picker offers them, and deleted with the parent's row.

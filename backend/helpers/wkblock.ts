@@ -23,9 +23,10 @@ import type { BlockDefinition, BlockProp } from '../models/blocks.ts'
  *
  * So every length the header CLAIMS is bounded before a byte of the payload is touched, every file's
  * digest is checked against what was decompressed, and every path has to fall inside the block's own
- * namespace. That last one is not tidiness: the serving route decides which block answers a request
- * from the first path segment alone, so a package reaching outside its namespace would answer for a
- * block it is not.
+ * namespace — or that of one of the child blocks it declares, which travel in their parent's package
+ * because they cannot be installed on their own. That last one is not tidiness: the serving route
+ * decides which block answers a request from the first path segment alone, so a package reaching
+ * outside its namespace would answer for a block it is not.
  *
  * Every refusal is a `CustomError` naming what is wrong, because every one of them is something the
  * administrator who uploaded the file can act on — a truncated download, the wrong file, a package
@@ -62,6 +63,9 @@ const BLOCK_KEY_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/
 const PROP_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,63}$/
 
 const PROP_TYPES = new Set(['string', 'number', 'boolean', 'select', 'icon'])
+
+/** The most child blocks one package may bring. */
+const MAX_CHILDREN = 16
 
 interface PackageFileEntry {
   path: string
@@ -101,9 +105,10 @@ function refuse(message: string): never {
  * separator where this check would not). And it has to sit inside the block's own namespace, which
  * is what stops an imported block from standing on a built-in one: the serving route decides which
  * root answers a request from the first segment of the path alone, so a package holding
- * `block-diagram/foo.js` would answer for a block it is not.
+ * `block-diagram/foo.js` would answer for a block it is not. `blockDirs` is the block's own namespace
+ * and those of the children its definition declares — nothing else.
  */
-function isServablePath(filePath: string, blockDir: string): boolean {
+function isServablePath(filePath: string, blockDirs: string[]): boolean {
   if (
     !filePath ||
     filePath.length > 255 ||
@@ -116,10 +121,11 @@ function isServablePath(filePath: string, blockDir: string): boolean {
   ) {
     return false
   }
-  return (
-    filePath === `${blockDir}.js` ||
-    filePath === `${blockDir}.worker.js` ||
-    filePath.startsWith(`${blockDir}/`)
+  return blockDirs.some(
+    (blockDir) =>
+      filePath === `${blockDir}.js` ||
+      filePath === `${blockDir}.worker.js` ||
+      filePath.startsWith(`${blockDir}/`)
   )
 }
 
@@ -129,15 +135,24 @@ function isServablePath(filePath: string, blockDir: string): boolean {
  * Read rather than trusted, and rebuilt key by key rather than spread: what comes back is stored on
  * the block's row, handed to the editor to build a form from, and turned into the sanitiser's
  * allow list for the block's tag. An unknown key would travel all of that way meaning nothing.
+ *
+ * `parent` is the package's own key when this is one of the children it declares, which have to say
+ * `isChild` and may not declare children of their own; the package's own block is the opposite.
  */
-function readDefinition(raw: any, block: string): BlockDefinition {
+function readDefinition(raw: any, block: string, parent?: string): BlockDefinition {
   if (!raw || typeof raw !== 'object' || raw.block !== block) {
     refuse("The package's definition does not describe the block it claims to be.")
   }
-  if (raw.isChild) {
+  if (!parent && raw.isChild) {
     refuse(
-      'This is a child block — one that only ever appears inside another. It has nothing to be installed or switched on separately from whatever holds it.'
+      'This is a child block — one that only ever appears inside another. It has nothing to be installed or switched on separately from whatever holds it; install the package of the block that holds it.'
     )
+  }
+  if (parent && raw.isChild !== true) {
+    refuse(`"${block}" is listed as a child of "${parent}" but does not say it is a child block.`)
+  }
+  if (parent && raw.children !== undefined) {
+    refuse(`"${block}" is a child of "${parent}" and declares children of its own.`)
   }
   const text = (value: unknown, field: string, max: number): string => {
     if (typeof value !== 'string' || value.length > max) {
@@ -164,7 +179,31 @@ function readDefinition(raw: any, block: string): BlockDefinition {
   if (raw.contentEditor) {
     definition.contentEditor = text(raw.contentEditor, 'contentEditor', 64)
   }
+  if (parent) {
+    definition.isChild = true
+  } else if (raw.children !== undefined) {
+    definition.children = readChildren(raw.children, block)
+  }
   return definition
+}
+
+/** The definitions of the child blocks a package's block brings — see `dev/specs/wkblock.md` §4. */
+function readChildren(raw: any, parent: string): BlockDefinition[] {
+  if (!Array.isArray(raw) || raw.length > MAX_CHILDREN) {
+    refuse(`The package's "children" is not a list of at most ${MAX_CHILDREN} child blocks.`)
+  }
+  const seen = new Set<string>()
+  return raw.map((child: any) => {
+    const key = child?.block
+    if (typeof key !== 'string' || !BLOCK_KEY_PATTERN.test(key) || key === parent) {
+      refuse(`"${key}" is not a usable key for a child block.`)
+    }
+    if (seen.has(key)) {
+      refuse(`The package lists the child block "${key}" twice.`)
+    }
+    seen.add(key)
+    return readDefinition(child, key, parent)
+  })
 }
 
 function readProps(raw: any): BlockProp[] {
@@ -260,6 +299,10 @@ export function readBlockPackage(data: Buffer): BlockPackage {
   }
   const blockDir = `block-${block}`
   const definition = readDefinition(header.definition, block)
+  const blockDirs = [
+    blockDir,
+    ...(definition.children ?? []).map((child) => `block-${child.block}`)
+  ]
 
   if (
     !Array.isArray(header.files) ||
@@ -274,9 +317,9 @@ export function readBlockPackage(data: Buffer): BlockPackage {
   let unpackedSize = 0
   let payloadSize = 0
   for (const entry of header.files) {
-    if (!isServablePath(entry?.path, blockDir)) {
+    if (!isServablePath(entry?.path, blockDirs)) {
       refuse(
-        `The package holds "${entry?.path}", which is outside ${blockDir}'s own files. A block may only bring ${blockDir}.js, ${blockDir}.worker.js and ${blockDir}/**.`
+        `The package holds "${entry?.path}", which is outside ${blockDirs.join(', ')}'s own files. A block may only bring <block>.js, <block>.worker.js and <block>/** for itself and the children it declares.`
       )
     }
     if (
@@ -325,8 +368,10 @@ export function readBlockPackage(data: Buffer): BlockPackage {
     files.set(entry.path, bytes)
   }
 
-  if (!files.has(`${blockDir}.js`)) {
-    refuse(`The package has no ${blockDir}.js, which is the file the wiki loads the block from.`)
+  for (const dir of blockDirs) {
+    if (!files.has(`${dir}.js`)) {
+      refuse(`The package has no ${dir}.js, which is the file the wiki loads that block from.`)
+    }
   }
 
   return {

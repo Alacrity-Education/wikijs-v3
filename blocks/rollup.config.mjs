@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { parseAst } from 'rollup/parseAst'
 import summary from 'rollup-plugin-summary'
 import terser from '@rollup/plugin-terser'
 import resolve from '@rollup/plugin-node-resolve'
@@ -41,6 +42,38 @@ function literalToValue(node, blockDir) {
         `${blockDir}: "static definition" must contain only plain literals, got ${node.type}.`
       )
   }
+}
+
+/**
+ * The `static definition` of the component class in a parsed `component.js`, or undefined when it
+ * declares none.
+ */
+function definitionFromAst(ast, blockDir) {
+  for (const node of ast.body) {
+    const classNode = node.type === 'ExportNamedDeclaration' ? node.declaration : node
+    if (classNode?.type !== 'ClassDeclaration') {
+      continue
+    }
+    const definitionNode = classNode.body.body.find(
+      (member) =>
+        member.type === 'PropertyDefinition' && member.static && member.key.name === 'definition'
+    )
+    if (definitionNode) {
+      return literalToValue(definitionNode.value, blockDir)
+    }
+  }
+  return undefined
+}
+
+/**
+ * Read a block directory's `static definition` straight from its source, without compiling anything.
+ *
+ * For `package.mjs`, which has to know which children a block declares (`children`) before it can
+ * tell rollup what to compile.
+ */
+export function readStaticDefinition(blockDir) {
+  const source = fs.readFileSync(path.join(blockDir, 'component.js'), 'utf8')
+  return definitionFromAst(parseAst(source), blockDir)
 }
 
 const ASSET_MIME_TYPES = {
@@ -118,9 +151,9 @@ function cssAsString() {
  * The definitions are read from the AST rather than by importing the modules, since a component
  * registers itself with `customElements` on load and so cannot be imported outside a browser.
  *
- * `only` narrows it to a single block directory, for `package.mjs` — a package carries the one
- * definition the instance importing it will register, and nothing about the blocks that happened to
- * be sitting beside it in the tree it was built from.
+ * `only` narrows it to the block directories being packaged, for `package.mjs` — a package carries the
+ * definitions of the block the instance importing it will register and of the children it brings, and
+ * nothing about the blocks that happened to be sitting beside it in the tree it was built from.
  */
 function blocksManifest(only) {
   const definitions = new Map()
@@ -134,24 +167,12 @@ function blocksManifest(only) {
         return null
       }
       const blockDir = id.split('/').at(-2)
-      if (only && blockDir !== only) {
+      if (only && !only.includes(blockDir)) {
         return null
       }
-      const ast = this.parse(code)
-      for (const node of ast.body) {
-        const classNode = node.type === 'ExportNamedDeclaration' ? node.declaration : node
-        if (classNode?.type !== 'ClassDeclaration') {
-          continue
-        }
-        const definitionNode = classNode.body.body.find(
-          (member) =>
-            member.type === 'PropertyDefinition' &&
-            member.static &&
-            member.key.name === 'definition'
-        )
-        if (definitionNode) {
-          definitions.set(blockDir, literalToValue(definitionNode.value, blockDir))
-        }
+      const definition = definitionFromAst(this.parse(code), blockDir)
+      if (definition) {
+        definitions.set(blockDir, definition)
       }
       if (!definitions.has(blockDir)) {
         this.warn(`${blockDir} has no "static definition" — it will not appear in the admin area.`)
@@ -195,13 +216,13 @@ const IGNORED_DIRS = ['dist/**', 'node_modules/**']
  * Both, because a block is as likely to have one JSON document of its own as a package's worth of
  * character maps, and having to invent a folder to hold a single file is a trap rather than a rule.
  *
- * `only` narrows it to a single block directory, as above.
+ * `only` narrows it to the block directories being packaged, as above.
  */
 function blockAssets(only) {
   return {
     name: 'block-assets',
     buildStart() {
-      for (const listPath of glob.sync(`@(${only ?? 'block-*'})/assets.json`, {
+      for (const listPath of glob.sync(`@(${only?.join('|') ?? 'block-*'})/assets.json`, {
         ignore: IGNORED_DIRS
       })) {
         const blockDir = listPath.split('/')[0]
@@ -256,9 +277,10 @@ function blockAssets(only) {
 /**
  * The rollup configuration, for the whole `blocks/` tree or for one block of it.
  *
- * `only` is a block directory name (`block-xyz`), and is what `package.mjs` builds a distributable
- * block with. Two things differ in that mode, both about the block ending up somewhere other than
- * `compiled/` beside its siblings:
+ * `only` is a block directory name (`block-xyz`), or a list of them, and is what `package.mjs` builds a
+ * distributable block with: the block, followed by the child blocks it brings (`children` in its
+ * definition, see `dev/specs/wkblock.md`). Two things differ in that mode, both about the block ending
+ * up somewhere other than `compiled/` beside its siblings:
  *
  *   - the output goes wherever the packager asks, since it is a staging directory rather than the
  *     tree the server serves;
@@ -271,7 +293,9 @@ function blockAssets(only) {
  *     which is the namespace the server hands back out.
  */
 export function buildConfig({ only, outputDir = 'compiled' } = {}) {
-  const entryGlob = only ?? 'block-*'
+  // -> The first directory is the block being packaged, and the one every shared chunk is named into
+  const dirs = typeof only === 'string' ? [only] : only
+  const entryGlob = dirs?.join('|') ?? 'block-*'
   return {
     input: Object.fromEntries([
       ...glob.sync(`@(${entryGlob})/component.js`, { ignore: IGNORED_DIRS }).map((file) => {
@@ -294,11 +318,11 @@ export function buildConfig({ only, outputDir = 'compiled' } = {}) {
     output: {
       dir: outputDir,
       format: 'es',
-      ...(only ? { chunkFileNames: `${only}/[name]-[hash].js` } : {})
+      ...(dirs ? { chunkFileNames: `${dirs[0]}/[name]-[hash].js` } : {})
     },
     plugins: [
-      blocksManifest(only),
-      blockAssets(only),
+      blocksManifest(dirs),
+      blockAssets(dirs),
       cssAsString(),
       // -> `production` is stated rather than left to be inferred: since v16 the plugin picks the
       //    `development` or `production` export condition off `process.env.NODE_ENV`, and this build

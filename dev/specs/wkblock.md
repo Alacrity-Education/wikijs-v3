@@ -4,7 +4,8 @@
 **Implemented by:** [`blocks/package.mjs`](../../blocks/package.mjs) (writer) and
 [`backend/helpers/wkblock.ts`](../../backend/helpers/wkblock.ts) (reader).
 
-A `.wkblock` is the single file one content block is distributed as. An administrator uploads it
+A `.wkblock` is the single file one content block is distributed as — together with the child
+blocks that only ever appear inside it, when it has any ([§4](#child-blocks-travel-with-their-parent)). An administrator uploads it
 under **Administration → Content Blocks → Install Block…** and the block is available to authors
 immediately — nothing on the instance is rebuilt and nothing is restarted.
 
@@ -96,7 +97,7 @@ Gzipped UTF-8 JSON:
 | Field | Meaning |
 | --- | --- |
 | `block` | The key. Must match `/^[a-z0-9][a-z0-9-]{0,62}$/`. |
-| `definition` | The component's `static definition`, verbatim — see [§5](#5-the-definition). |
+| `definition` | The component's `static definition`, verbatim — see [§5](#5-the-definition) — except that `children`, when present, holds the child blocks' definitions rather than their keys. |
 | `packagedAt` | ISO 8601. Diagnostics only; the reader defaults it to `''` if absent or not a string. |
 | `packagedWith` | Version of the wiki the packager came from. Diagnostics only, same tolerance. |
 | `files` | Payload entries, in payload order. `sha256` is of the **uncompressed** bytes. |
@@ -110,14 +111,19 @@ Gzipped UTF-8 JSON:
 **One block per package, and the directory name is the identity.** `blocks/block-xyz/` declares
 `block: 'xyz'`, packages as `block-xyz.wkblock`, serves as `block-xyz.js`, and renders as
 `<block-xyz>`. The packager refuses a mismatch, because every one of those names is derived from the
-same key.
+same key. The one block may bring its children with it — see below — but the package is still named,
+imported, switched on and deleted as that one block.
 
-**Every path in a package must fall inside that block's own namespace:**
+**Every path in a package must fall inside that block's own namespace**, or inside the namespace of
+one of the children its definition declares:
 
 ```
 block-<key>.js           ← required; the file the wiki loads the block from
 block-<key>.worker.js    ← optional
 block-<key>/**           ← assets and shared chunks
+block-<child>.js         ← required for each declared child
+block-<child>.worker.js  ← optional
+block-<child>/**         ← that child's own assets
 ```
 
 This is what lets an imported block and a built-in one be served from the same `/_blocks/` without
@@ -125,19 +131,44 @@ either standing on the other, and it is enforced **on both sides** — by the pa
 can still do something about it, and by the reader, where it is a security check.
 
 Note this differs from a full `npm run build`: there, shared chunks sit at the output root.
-`buildConfig({ only })` names them into `block-<key>/` instead, precisely so a package can be
-namespaced.
+`buildConfig({ only })` names them into `block-<key>/` instead — the PARENT's directory, also for the
+chunks a child shares with it — precisely so a package can be namespaced.
 
 A path is rejected unless it is a plain relative path. The reader refuses any of: empty, longer than
 255 characters, containing `\`, leading `/`, any `.` or `..` segment, trailing `/`, `//`, or any
 character below U+0020. The backslash rule matters because the path is joined onto a cache directory
 and a Windows instance would read `\` as a separator where this check would not.
 
-### Child blocks are refused outright
+### Child blocks travel with their parent
 
-A block with `isChild` is part of whatever holds it — it has no row, no enable toggle and nothing to
-switch on — so a package of one would install nothing. Both halves refuse it, with a message saying to
-package the parent instead.
+A block with `isChild` is part of whatever holds it — a card of a row of cards, a tab of a set of
+tabs. It has no row, no enable toggle and nothing to switch on of its own. So:
+
+- **A child on its own is refused.** A package whose block is a child would install nothing. Both
+  halves refuse it, with a message saying to package the parent instead.
+- **A parent names its children**, as keys, in its own `static definition`:
+
+  ```js
+  static definition = { block: 'cards', name: 'Cards', …, children: ['card'] }
+  ```
+
+  The packager compiles each named child (`blocks/block-card/`) into the same package, and replaces
+  the list of keys with the children's own definitions — so in a package, `definition.children` is an
+  array of definitions, each with `isChild: true`. A key that names no directory, a directory whose
+  definition is not `isChild`, or a child that names children of its own, is refused.
+- **Each child serves under its own namespace** (`block-card.js`, `block-card/**`), since that is
+  the address the wiki asks for when it finds `<block-card>` in a page. The namespace check is widened
+  to the declared children and nothing else: a package cannot bring files for a block it does not
+  declare.
+- A child is not something a full `npm run build` treats any differently — `children` is read by the
+  packager alone. Built-in children are still recognised by `isChild`, as before.
+
+### Compatibility
+
+This is format version 1 still. A package with no children is exactly what it always was. One WITH
+children is refused by a reader that predates them — its child's `block-<child>.js` falls outside the
+parent's namespace, and that reader says so, naming the file — so an older instance never installs
+half of one; it installs nothing and the administrator is told which file it objected to.
 
 ---
 
@@ -158,6 +189,14 @@ tag — an unknown key would travel all of that way meaning nothing.
 | `template` | Optional string, ≤ 8192. For an inline block, the value between the brackets an editor starts it with. |
 | `asciidocTemplate` | Optional string, ≤ 8192. |
 | `contentEditor` | Optional string, ≤ 64. |
+| `children` | Optional array, ≤ 16 entries, of child definitions. Only on the package's own block — a child may not have one. |
+
+Each child definition is read by the same rules as above, plus:
+
+| Key | Rule |
+| --- | --- |
+| `block` | Matches the key pattern of [§3](#3-header), is not the parent's key, and appears once. |
+| `isChild` | Must be exactly `true`, and is kept. |
 
 Each prop:
 
@@ -197,15 +236,16 @@ character maps is legitimately a couple of dozen megabytes.
 2. `version === 1` → else a message naming both versions, since the likely cause is a newer wiki.
 3. `headerLen` ≥ 1, ≤ `MAX_HEADER_SIZE`, and `16 + headerLen ≤ file length`.
 4. Header gunzips and parses as JSON.
-5. `block` matches the key pattern; definition validates ([§5](#5-the-definition)).
+5. `block` matches the key pattern; definition validates ([§5](#5-the-definition)), children
+   included, and the block itself is not `isChild`.
 6. `files` is an array, 1 … `MAX_FILE_COUNT`.
-7. **Every entry**: path is servable and namespaced; `size` and `compressedSize` are non-negative
+7. **Every entry**: path is servable and namespaced (the block's or a declared child's); `size` and `compressedSize` are non-negative
    integers; `sha256` is 64 lowercase hex.
 8. `Σ size ≤ MAX_UNPACKED_SIZE`.
 9. `16 + headerLen + Σ compressedSize === file length`.
 10. Then, per entry in order: no duplicate path, gunzip with `maxOutputLength`, and the decompressed
     bytes must match both the stated `size` and the stated `sha256`.
-11. `block-<key>.js` is present.
+11. `block-<key>.js` is present, and `block-<child>.js` for every declared child.
 
 Every failure is a `CustomError('blockPackageInvalid', …)` naming what is wrong, because every one of
 them is something the administrator who uploaded the file can act on — a truncated download, the wrong
@@ -238,8 +278,10 @@ file, and the namespace check on every path.
 - **Re-importing the same key is an upgrade, not a second block.** The row is updated, so what the
   site had switched on and configured on it survives. The reply says `isNew: false`.
 - **A key a built-in block already uses is refused with 409** (`blockPackageConflict`), since both
-  would be served from the same address. Two conditions raise it: the key belongs to a block compiled
-  into this wiki, or the site already has a non-custom row under it.
+  would be served from the same address. That holds for the package's own key AND each of its
+  children's. Three conditions raise it: a key belongs to a block compiled into this wiki (a built-in
+  child included), the site already has a non-custom row under the package's key, or the key is the
+  site's under ANOTHER custom block — as that block's own key or as one of its children's.
 - The block is registered **enabled** and is available to authors immediately.
 
 ### Storage
@@ -249,7 +291,7 @@ On the `blocks` row:
 | Column | Contents |
 | --- | --- |
 | `packageData` | The `.wkblock` verbatim. Null for a built-in. **This is the only copy.** |
-| `definition` | The package's copy of the definition. Empty for a built-in, whose definition is read from the compiled manifest so that an updated block describes itself the moment it is deployed. |
+| `definition` | The package's copy of the definition, its children's definitions included under `children`. Empty for a built-in, whose definition is read from the compiled manifest so that an updated block describes itself the moment it is deployed. |
 | `checksum` | SHA-256 of the package, and the name of its directory in the disk cache. Empty for a built-in. |
 
 ### Serving
@@ -260,7 +302,9 @@ leaves nothing to ask the question in front of it; the plugin is still registere
 for `reply.sendFile`.
 
 - **The first path segment names the block, and that is the whole decision** — which is why the
-  namespace rule in [§4](#4-namespacing-the-rule-everything-else-rests-on) is enforced so hard.
+  namespace rule in [§4](#4-namespacing-the-rule-everything-else-rests-on) is enforced so hard. A
+  child's key resolves to its parent: `block-card.js` is served out of the unpacked `block-cards`
+  package of the site that was asked.
 - **It depends on which site was asked.** Two sites on one instance may each have imported a different
   block under the same key. The frontend has no site in hand when it loads a block — it reads a tag out
   of a page and asks for it — so the hostname resolves it through the same `WIKI.sitesMappings` lookup
@@ -296,7 +340,12 @@ props in `getSiteBlocks`, and its tag and attributes in the sanitiser's allow li
 query is deliberately not cached: a definition it misses is a block stripped out of somebody's page.
 
 Everything else is identical to a built-in, the enable toggle included — a custom block that is
-switched off is stripped from a page being saved exactly as a built-in one is.
+switched off is stripped from a page being saved exactly as a built-in one is. A custom block's
+children are treated as built-in children are: always let through the sanitiser, then unwrapped if no
+block holds them (`unwrapOrphanedChildBlocks`, which counts the custom blocks of the site as parents
+and their children as children), and listed by `getSiteBlocks` with `isChild` so that the editor
+builds their forms but never offers them for inserting. Deleting the block deletes its children,
+which live on its row.
 
 ---
 
@@ -332,5 +381,6 @@ drifting from a file the writer actually produced, which is the failure that mat
   own it proves nothing useful.
 - **No dependency or compatibility declaration.** A package does not say which wiki versions it works
   with. `packagedWith` is recorded but never acted on.
-- **One block per file.** A suite of related blocks is *n* uploads. This is a consequence of the key
-  being the identity and is not obviously worth changing.
+- **One block per file.** A suite of related blocks is *n* uploads — except for child blocks, which
+  travel inside their parent's package. This is a consequence of the key being the identity and is
+  not obviously worth changing.
