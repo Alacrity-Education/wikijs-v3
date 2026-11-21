@@ -90,3 +90,9 @@ switched off is stripped from a page being saved exactly as a built-in one is. I
 treated as built-in children: always allowed through the sanitiser, unwrapped by
 `unwrapOrphanedChildBlocks` when nothing holds them (custom blocks count as parents there), listed by
 `getSiteBlocks` with `isChild` so no picker offers them, and deleted with the parent's row.
+
+**Moving a built-in block into a package takes a migration.** `syncSite` deletes the row of a built-in
+that left the build, and with it whether the site had it switched on. So the commit that removes it
+also converts each site's row into a custom row awaiting its package (`isCustom`, no `packageData`,
+empty `checksum`, and the package's definition so the sanitiser keeps its tags until the import), which
+the import then upgrades in place. `cards-as-package` is the worked example.

@@ -205,7 +205,12 @@ export function slugifyHeading(text: string): string {
  * a property of that block's own markup.
  */
 const TAB_TAG = 'block-tab'
-/** Fork: the card of a `block-cards` row, whose title is a heading left out of the contents. */
+/**
+ * Fork: the card of a `block-cards` row, whose title is a heading left out of the contents.
+ *
+ * Named by tag, since the block is no longer part of this build: it is imported as the `block-cards`
+ * package from the Alacrity-Education/wiki-blocks repository, `block-card` inside it.
+ */
 const CARD_TAG = 'block-card'
 
 /**

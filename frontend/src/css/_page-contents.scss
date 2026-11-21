@@ -2064,7 +2064,8 @@
 
   /*
     Fork. Cards: what a `::block-card` holds, sorted by the card into a title, a picture and the
-    text under it (`blocks/block-card`), which draws the outlined box around them.
+    text under it (`block-card/component.js` in the Alacrity-Education/wiki-blocks repository, which
+    ships it inside the `block-cards` package), which draws the outlined box around them.
 
     Here rather than in the block for the reason `block-steps` gives: this is page content, and a
     document's own rules outrank a shadow root's `::slotted()` ones. The card marks the first and

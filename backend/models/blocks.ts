@@ -416,7 +416,10 @@ class Blocks {
       }
     }
 
-    // -> A built-in that has been removed from disk should not linger in the admin list
+    // -> A built-in that has been removed from disk should not linger in the admin list. One that is
+    //    moving into a package instead needs a migration turning its rows into custom rows awaiting
+    //    that package before this runs, or the sites lose whether they had it switched on — see the
+    //    `cards-as-package` migration
 
     const orphaned = existing
       .map((entry: any) => entry.block)

@@ -282,6 +282,9 @@ file, and the namespace check on every path.
   children's. Three conditions raise it: a key belongs to a block compiled into this wiki (a built-in
   child included), the site already has a non-custom row under the package's key, or the key is the
   site's under ANOTHER custom block — as that block's own key or as one of its children's.
+- **A row awaiting its package is adopted.** A custom row with no `packageData` — what a built-in
+  block that moved into a package is left as (see the `cards-as-package` migration) — is upgraded in
+  place like any other custom row, so the site keeps whether it had the block switched on.
 - The block is registered **enabled** and is available to authors immediately.
 
 ### Storage
