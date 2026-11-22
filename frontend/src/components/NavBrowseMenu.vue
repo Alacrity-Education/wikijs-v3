@@ -58,28 +58,33 @@
               class="browse-menu-row flex flex-nowrap items-stretch">
               <!--
                 One row per name, whichever of the two kinds it is -- and both at once for a page
-                that also has a folder of pages under it. There the label opens the page and the
-                chevron beside it descends, so neither way in hides the other.
+                that also has a folder of pages under it. The label always GOES somewhere: to the
+                page, or for a folder with no page of its own to the folder itself, whose screen
+                lists what is in it and puts the folder's menu in the sidebar, as its breadcrumb
+                does. The chevron beside a folder descends in this menu instead, so browsing on
+                and opening are two separate clicks and neither hides the other.
               -->
               <router-link
-                v-if="item.isPage"
                 class="browse-menu-target"
                 :to="`${localePrefix}/${item.path}`"
                 @click="menu?.hide()">
-                <w-icon :name="item.icon || `la:file-alt`" size="xs" class="shrink-0 opacity-70" />
+                <w-icon
+                  v-if="item.isPage"
+                  :name="item.icon || `la:file-alt`"
+                  size="xs"
+                  class="shrink-0 opacity-70" />
+                <!-- -> The File Manager's folder, so a folder looks the same wherever the wiki draws
+                        one. Full strength, unlike the line icons around it: it is a colour image, and
+                        dimming it only washes the yellow out. -->
+                <w-icon
+                  v-else
+                  name="img:/_assets/icons/fluent-folder.svg"
+                  size="xs"
+                  class="shrink-0" />
                 <span class="truncate">{{ item.title }}</span>
               </router-link>
-              <!-- -> The File Manager's folder, so a folder looks the same wherever the wiki draws
-                      one. Full strength, unlike the line icons around it: it is a colour image, and
-                      dimming it only washes the yellow out. -->
-              <button v-else type="button" class="browse-menu-target" @click="descend(item)">
-                <w-icon name="img:/_assets/icons/fluent-folder.svg" size="xs" class="shrink-0" />
-                <span class="truncate">{{ item.title }}</span>
-                <w-space />
-                <w-icon :name="forwardIcon" size="xs" class="shrink-0 opacity-40" />
-              </button>
               <button
-                v-if="item.isPage && item.isFolder"
+                v-if="item.isFolder"
                 type="button"
                 class="browse-menu-into"
                 :aria-label="t(`common.browse.openFolder`, { title: item.title })"
