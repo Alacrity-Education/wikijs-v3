@@ -375,6 +375,26 @@ export default {
   },
 
   /**
+   * Fork: who has a page's room open on this instance -- the accounts behind its sockets, each once,
+   * in the order they joined. Empty when the room is not open here. For telling somebody who is
+   * holding a page, never for deciding anything: a socket gone quiet is only dropped at the next
+   * keepalive, and an HA set's other instances hold rooms of their own.
+   */
+  editorIdsOf(roomId: string): string[] {
+    const room = this.rooms.get(roomId)
+    if (!room) {
+      return []
+    }
+    const ids = new Set<string>()
+    for (const conn of room.conns.values()) {
+      if (conn.userId && !conn.readOnly) {
+        ids.add(conn.userId)
+      }
+    }
+    return [...ids]
+  },
+
+  /**
    * Whether another instance is currently running.
    *
    * Asked so that the single-instance case — very much the common one — does not spend

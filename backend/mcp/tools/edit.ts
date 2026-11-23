@@ -1,3 +1,5 @@
+import { inArray } from 'drizzle-orm'
+import { users as usersTable } from '../../db/schema.ts'
 import { normalizeNewPagePath } from '../../helpers/common.ts'
 import { resolveLink } from '../../helpers/pageLinks.ts'
 import { sourceLinkHrefs } from '../../helpers/linkRewrite.ts'
@@ -124,6 +126,32 @@ export function applyEdits(source: string, edits: SourceEdit[]): string {
     result = result.slice(0, first) + edit.newText + result.slice(first + edit.oldText.length)
   })
   return result
+}
+
+/**
+ * Fork: who is holding a page open in the editor, as the refusal names them -- "Ana Pop is",
+ * "Ana Pop and Ion Ionescu are" -- so that whoever is told no knows whom to ask. "Somebody is" when
+ * the room's sockets name no account (they all left between the check and this, or the room belongs
+ * to a guest, which a page's never does).
+ */
+async function editingNow(pageId: string): Promise<string> {
+  const ids = WIKI.collab.editorIdsOf(pageId)
+  if (ids.length < 1) {
+    return 'Somebody is'
+  }
+  const rows = await WIKI.db
+    .select({ id: usersTable.id, name: usersTable.name })
+    .from(usersTable)
+    .where(inArray(usersTable.id, ids))
+  const names = ids
+    .map((id) => rows.find((row) => row.id === id)?.name?.trim())
+    .filter((name): name is string => Boolean(name))
+  if (names.length < 1) {
+    return 'Somebody is'
+  }
+  const list =
+    names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+  return `${list} ${names.length === 1 ? 'is' : 'are'}`
 }
 
 /**
@@ -425,7 +453,7 @@ const updatePage: McpTool<
     */
     if (WIKI.collab.rooms.has(page.id)) {
       throw new ToolError(
-        'Somebody is editing this page right now, and their next save would overwrite your change. Use suggest_edit instead, or try again later.'
+        `${await editingNow(page.id)} editing this page right now, and their next save would overwrite your change. Use suggest_edit instead, or try again later.`
       )
     }
 

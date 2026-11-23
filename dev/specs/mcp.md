@@ -830,7 +830,9 @@ saved while people were editing, their next save would be their room's text — 
 the agent's change in it — and would silently replace it.
 
 **`update_page` therefore refuses a page that has an open room**, telling the agent to use
-`suggest_edit` or try later. Not a relay of the room's `saved` message, which the first design had:
+`suggest_edit` or try later. Fork: the refusal names who has it open ("Ana Pop is editing this page right
+now…", from `collab.editorIdsOf` — the accounts behind the room's writing sockets), so that the
+person the agent works for knows whom to ask; "Somebody is" when no account can be named. Not a relay of the room's `saved` message, which the first design had:
 that message tells the editors that what they are looking at is now what is stored, which after an
 agent's save would be exactly wrong, and their unsaved-changes flag would go quiet over text that no
 longer matches the page. Writing the agent's edit into the room instead — as a collaborator typing —
