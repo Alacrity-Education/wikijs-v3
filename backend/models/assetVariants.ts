@@ -1,7 +1,7 @@
 import { fork, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { assets as assetsTable, tree as treeTable } from '../db/schema.ts'
 import { detectImageMime, isAnimatedImage, readImageDimensions } from '../helpers/images.ts'
 import { isVariantWidth, variantWidths } from '../helpers/imageVariants.ts'
@@ -27,6 +27,15 @@ const ENCODER_IDLE_MS = 60_000
 
 /** How long an asset whose encode failed for a reason that may pass is left alone. */
 const RETRY_AFTER_MS = 30 * 60_000
+
+/**
+ * How much of an original is read out of the database per query.
+ *
+ * node-postgres receives a `bytea` as hex text and grows its read buffer by doubling until the whole
+ * row fits: one 59 MB file read in one go came to a 118 MB string on the heap and ~430 MB of buffers
+ * besides, per read, two reads at a time. In slices it is a few times this, whatever the file's size.
+ */
+const DB_READ_CHUNK = 4 * 1024 * 1024
 
 /** As for the file cache: sweep once this much of the ceiling has been written, trim to this much. */
 const SWEEP_TRIGGER_RATIO = 0.25
@@ -102,6 +111,8 @@ export class AssetVariants {
   sweeping = false
   /** The most jobs ever seen running at once, for the logs and the tests. */
   peakRunning = 0
+  /** Who is waiting for a job to finish (`waitForProgress`), woken together when one does. */
+  progressWaiters: (() => void)[] = []
 
   get settings(): typeof DEFAULTS {
     return { ...DEFAULTS, ...WIKI.config.files?.variants }
@@ -219,8 +230,32 @@ export class AssetVariants {
         this.jobs.delete(job.key)
         job.resolve()
         this.drain()
+        const waiters = this.progressWaiters
+        this.progressWaiters = []
+        for (const wake of waiters) {
+          wake()
+        }
       })
     }
+  }
+
+  /**
+   * Resolve when the next job finishes, or after `ms`, whichever is first. One timer per wait, cleared
+   * when it is not needed: what the reconcile throttles itself on. Waiting on the jobs' own promises
+   * instead spins -- one already settled answers every `Promise.race` at once, the loop never yields
+   * to the event loop that would let the queue move, and each turn leaves a timer behind until the
+   * heap is gone. That took the whole wiki down on a real data set.
+   */
+  waitForProgress(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const wake = () => {
+        clearTimeout(timer)
+        this.progressWaiters = this.progressWaiters.filter((w) => w !== wake)
+        resolve()
+      }
+      const timer = setTimeout(wake, ms)
+      this.progressWaiters.push(wake)
+    })
   }
 
   async run(job: Job): Promise<void> {
@@ -303,16 +338,51 @@ export class AssetVariants {
   }
 
   /**
-   * The original's bytes: off the file cache where this instance has them, since that is a local read,
-   * and from storage otherwise — without filling the file cache, which a backfill of every image in
-   * the wiki would otherwise churn through.
+   * The original's bytes: off the file cache where this instance has them, since that is a local read;
+   * out of the asset's own row in slices where the database holds a copy; from storage otherwise.
+   * Never filling the file cache, which a backfill of every image in the wiki would churn through.
+   *
+   * The database copy is read here rather than through `getContent` for the memory: see
+   * `DB_READ_CHUNK`. A row whose `data` is set holds the current bytes regardless of which target is
+   * nominated for delivery — every write goes to every target storing the type, and the database
+   * target clears the column when it stops storing it — so reading it is not a second opinion.
    */
   async readOriginal(source: VariantSource): Promise<Buffer | null> {
     try {
       return await fs.readFile(WIKI.models.assets.contentCachePath(source))
     } catch {
-      return (await WIKI.models.assets.getContent(source.id))?.data ?? null
+      // -> Not cached on this instance
     }
+    const fromDb = await this.readFromDatabase(source.id)
+    if (fromDb) {
+      return fromDb
+    }
+    return (await WIKI.models.assets.getContent(source.id))?.data ?? null
+  }
+
+  /** The database target's copy, read in slices into one buffer. Null when the row holds none. */
+  async readFromDatabase(id: string): Promise<Buffer | null> {
+    const sized = await WIKI.db.execute(
+      sql`SELECT octet_length(${assetsTable.data})::bigint AS "length" FROM ${assetsTable} WHERE ${assetsTable.id} = ${id}`
+    )
+    const length = Number(sized.rows[0]?.length ?? Number.NaN)
+    if (!Number.isFinite(length)) {
+      return null
+    }
+    const data = Buffer.allocUnsafe(length)
+    for (let offset = 0; offset < length; offset += DB_READ_CHUNK) {
+      const part = await WIKI.db.execute(
+        sql`SELECT substring(${assetsTable.data} FROM ${offset + 1} FOR ${DB_READ_CHUNK}) AS "part" FROM ${assetsTable} WHERE ${assetsTable.id} = ${id}`
+      )
+      const chunk = part.rows[0]?.part as Buffer | undefined
+      // -> Replaced or deleted mid-read: the caller's `isCurrent` check would catch the first, but a
+      //    short read is not worth handing on either way
+      if (!chunk || chunk.length !== Math.min(DB_READ_CHUNK, length - offset)) {
+        return null
+      }
+      chunk.copy(data, offset)
+    }
+    return data
   }
 
   async markOriginal(source: VariantSource, widths: number[]): Promise<void> {
@@ -621,7 +691,7 @@ export class AssetVariants {
       }
       // -> No faster than the encoders take it, so that the budget bounds what this run starts
       while (this.queue.length >= this.concurrency && Date.now() <= deadline && !signal?.aborted) {
-        await Promise.race([...waiting, sleep(1000)])
+        await this.waitForProgress(1000)
       }
       if (signal?.aborted || Date.now() > deadline) {
         break
@@ -686,8 +756,4 @@ async function fileExists(filePath: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }

@@ -36,7 +36,11 @@ worker thread or a promise: Sharp works on libvips's threads and the libuv pool,
 shares with the server, so neither would cap anything. In the child libvips is held to one thread
 (`sharp.concurrency(1)`) and libuv to one (`UV_THREADPOOL_SIZE=1`), so an encode is one core, it never
 occupies the pool the server's file reads use, and a decoder crash or a memory blow-up ends the child.
-The queue is in memory rather than the scheduler's job table because the copies are on THIS
+The reconcile throttles itself on `waitForProgress` (woken when a job finishes), never on a race over
+its jobs' promises: one already settled answers every race at once, the loop never yields, and the
+main process ran out of heap within seconds on the beta's ~500 images. An original held by the
+database is read in 4 MB slices (`readFromDatabase`), since node-postgres turns a whole `bytea` into
+a hex string twice its size and doubles its read buffer to fit it. The queue is in memory rather than the scheduler's job table because the copies are on THIS
 instance's disk: a job claimed by another instance would fill the wrong cache. What a restart loses,
 the reconcile finds.
 
