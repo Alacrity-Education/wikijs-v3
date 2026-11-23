@@ -20,6 +20,7 @@ import {
   sanitizeSvg
 } from '../helpers/images.ts'
 import type { ImageAdjust, ImageDimensions, ImageOperation } from '../helpers/images.ts'
+import { AssetVariants } from './assetVariants.ts'
 import type { Readable } from 'node:stream'
 import type { DeletedEntry } from './tree.ts'
 import type { StorageAssetRef } from './storage.ts'
@@ -333,6 +334,43 @@ class Assets {
   sweeping = false
 
   /**
+   * Fork: the scaled-down WebP copies of images, made in the background and served by `/_files/` for
+   * `?w=`. A cache beside this one, with its own directory and ceiling — see `assetVariants.ts`.
+   */
+  variants = new AssetVariants()
+
+  /**
+   * Fork: ask for an image's copies, in the background, once its bytes have changed or arrived.
+   * Nothing waits on it and nothing it does can fail the caller; a copy it misses, the scheduled
+   * reconcile makes.
+   */
+  queueVariants(id: string): void {
+    void (async () => {
+      const [row] = await WIKI.db
+        .select({
+          id: assetsTable.id,
+          updatedAt: assetsTable.updatedAt,
+          kind: assetsTable.kind,
+          mimeType: assetsTable.mimeType,
+          fileSize: assetsTable.fileSize,
+          meta: assetsTable.meta
+        })
+        .from(assetsTable)
+        .where(eq(assetsTable.id, id))
+        .limit(1)
+      if (row) {
+        this.variants.request({
+          ...row,
+          fileSize: row.fileSize ?? 0,
+          width: (row.meta as Record<string, any> | null)?.width
+        })
+      }
+    })().catch((err: any) => {
+      WIKI.logger.warn(`Image copies: could not queue ${id}: ${err.message}`)
+    })
+  }
+
+  /**
    * What this site does about an upload landing on a name that is taken.
    *
    * Read per upload rather than held anywhere, so that changing it in the admin area applies to the
@@ -603,6 +641,10 @@ class Assets {
       throw err
     }
 
+    if (kind === 'image') {
+      this.queueVariants(entry.id)
+    }
+
     WIKI.models.hooks.emit('asset:upload', {
       id: entry.id,
       fileName: storedName,
@@ -727,6 +769,10 @@ class Assets {
     //    rather than left for the sweep, since the file they hold is gone for good.
     this.forgetPath(siteId, folderPath, fileName)
     await this.dropCachedContent([id])
+    // -> And copies of the new bytes, in the background as after an upload
+    if (kind === 'image') {
+      this.queueVariants(id)
+    }
 
     WIKI.models.hooks.emit('asset:edit', {
       id,
@@ -1335,6 +1381,10 @@ class Assets {
       throw err
     }
 
+    if (kind === 'image') {
+      this.queueVariants(entry.id)
+    }
+
     WIKI.models.hooks.emit('asset:upload', {
       id: entry.id,
       fileName: entry.fileName,
@@ -1551,6 +1601,12 @@ class Assets {
    * already does.
    */
   async dropCachedContent(ids: string[]): Promise<void> {
+    await this.dropFileCache(ids)
+    await this.variants.drop(ids)
+  }
+
+  /** The file cache's half of `dropCachedContent`, for a move, which carries its copies instead. */
+  async dropFileCache(ids: string[]): Promise<void> {
     for (const id of ids) {
       const shard = path.join(this.cachePath, id.slice(0, 2))
       try {
@@ -1632,6 +1688,8 @@ class Assets {
     this.writtenSinceSweep = 0
     await fs.rm(this.cachePath, { recursive: true, force: true })
     await fs.mkdir(this.cachePath, { recursive: true })
+    // -> The image copies too: derived like the rest, and remade by the scheduled reconcile
+    await this.variants.purge()
     WIKI.logger.info('Purged the file cache [ OK ]')
   }
 
@@ -1812,7 +1870,16 @@ class Assets {
     //    been resolved at before it was freed up
     this.forgetPath(siteId, asset.folderPath, asset.fileName)
     this.forgetPath(siteId, destination, storedName)
-    await this.dropCachedContent([id])
+    await this.dropFileCache([id])
+    // -> The bytes are the same, so the image copies are too: carried to the version the move made
+    //    rather than encoded again. A rename that made it an SVG is a `replace` below, which drops them.
+    const [moved] = await WIKI.db
+      .select({ updatedAt: assetsTable.updatedAt })
+      .from(assetsTable)
+      .where(eq(assetsTable.id, id))
+    if (moved) {
+      await this.variants.rekey(id, asset.updatedAt, moved.updatedAt)
+    }
 
     if (rescanned) {
       // -> Who it is credited to is unchanged by a scan, and a request with no user has nobody else

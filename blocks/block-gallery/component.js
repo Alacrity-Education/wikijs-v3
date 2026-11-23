@@ -1,6 +1,7 @@
 import { LitElement, html, css } from 'lit'
 
 import { resolveFilePath } from '../shared/files.js'
+import { useOriginalImage } from '../shared/images.js'
 import { DarkMode } from '../shared/theme.js'
 
 /**
@@ -393,7 +394,9 @@ https://example.com/photo-2.jpg`
     const found = source.split(/\s+/).filter(Boolean).map(resolveFilePath)
     if (!fence) {
       for (const image of this.querySelectorAll('img')) {
-        found.push(resolveFilePath(image.getAttribute('src') ?? ''))
+        // -> The file itself, not the scaled-down copy the page's `srcset` offers: the lightbox shows
+        //    it full size, and the page's own copy of it is never drawn
+        found.push(resolveFilePath(useOriginalImage(image)))
       }
     }
     // -> An address written once and drawn twice -- as a link and as the image it points at -- is one

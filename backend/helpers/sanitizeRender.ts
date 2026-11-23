@@ -246,7 +246,9 @@ const BASE_ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   //    inherited from the surrounding text by default, which is what an icon in a sentence wants;
   //    `inline` shifts it onto the text baseline, `width`/`height` override the 1em box.
   'iconify-icon': ['icon', 'inline', 'width', 'height', 'rotate', 'flip'],
-  img: ['src', 'srcset', 'alt', 'width', 'height', 'loading', 'decoding'],
+  // -> Fork: `sizes` goes with `srcset` -- without it a width-described `srcset` is chosen from as if
+  //    the picture were the whole window wide (see `helpers/renderImages.ts`, which writes both)
+  img: ['src', 'srcset', 'sizes', 'alt', 'width', 'height', 'loading', 'decoding'],
   input: ['type', 'checked', 'disabled'],
   ol: ['start', 'reversed', 'type'],
   /*
@@ -255,7 +257,7 @@ const BASE_ALLOWED_ATTRIBUTES: Record<string, string[]> = {
     `col` is a void element with nothing in it to carry anything else.
   */
   col: ['width', 'span'],
-  source: ['src', 'srcset', 'type', 'media'],
+  source: ['src', 'srcset', 'sizes', 'type', 'media'],
   td: ['colspan', 'rowspan', 'align'],
   th: ['colspan', 'rowspan', 'align', 'scope'],
   track: ['src', 'kind', 'srclang', 'label', 'default'],

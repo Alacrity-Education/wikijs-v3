@@ -69,8 +69,9 @@ before working in an area — and add to it there, not here:
   `distributing-blocks` (the `.wkblock` package), `emails`, `excalidraw`, `analytics`,
   `live-notes`, `audit-log`, `notifications`, `mcp`, `page-lifecycle`, `glossary`,
   `feedback-boards`, `metrics`, `icons`, `page-paths` (path segments, the ltree encoding),
-  `personal-access-tokens` (`config.scope`, `requestUser(req)`) and `image-editor` (the file
-  manager's image editor and resize).
+  `personal-access-tokens` (`config.scope`, `requestUser(req)`), `image-editor` (the file
+  manager's image editor and resize) and `image-delivery` (the scaled-down copies `/_files/`
+  serves, the job that makes them, and the `srcset` a render offers them in).
 - **Procedures** — `.claude/skills/`: `throwaway-instance` boots, scripts and tears down a
   disposable instance.
 

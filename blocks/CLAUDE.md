@@ -51,3 +51,23 @@ the `{…}` or after the value's comma — only inline blocks there, and never o
 A block tinted from the theme (`block-badge`, `block-progress`) takes a `color` select and paints
 it with `toneColor` from `shared/tones.js`; the options are still listed in each definition, which
 has to stay plain literals for the manifest.
+
+**A picture a block reads goes through `useOriginalImage` (`shared/images.js`) first** (fork). The
+server describes every `/_files/` `<img>` of a stored page for the browser (`backend/helpers/renderImages.ts`):
+a `srcset` of the scaled-down WebP copies `/_files/<path>?w=<width>` serves, a `sizes`, lazy loading,
+and the file's own `width` and `height` marked `data-natural-size`. That is right for a picture the
+page shows and wrong for one a block reads: a copy's `naturalWidth` and `currentSrc` are not the file's,
+and the size the server wrote is not one the author asked for. So a block that measures a picture,
+maps something onto its pixels or shows it elsewhere (a lightbox, a zoom) calls
+`useOriginalImage(img)` on the light DOM `<img>` before reading anything off it. It marks the element
+`data-original-image` (which the page's click-to-enlarge leaves alone; an `<img>` stored with it, as an
+author can write one, is one the server does not describe at all),
+removes `srcset`, `sizes`, and a `width`/`height` carrying `data-natural-size` — so a `width` still
+there is the author's — and returns the `src`, which is always the original's address. Removing
+`srcset` makes the browser select the source again, so the original is what loads; but the copy it may
+already have fetched stays the element's current image until then, so a block reading the pixel size
+off THAT element awaits `originalImageLoaded(img)` rather than trusting `complete`/`naturalWidth`
+straight after the call. `block-gallery` uses it for the pictures its lightbox shows, and wiki-blocks'
+`block-annotated-image` for the one its overlay is drawn in. A block that only slots the page's
+`<img>` and lets the article draw it (`block-card`) needs nothing. `shared/` is copied into the
+wiki-blocks repository, so a change here is made there too.

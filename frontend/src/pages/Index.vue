@@ -324,6 +324,8 @@
                 v-show="activeView === `article` && !isBlog && !isFeedbackBoard"
                 v-html="pageStore.render"
                 @click="onContentClick" />
+              <!-- -> Click to enlarge for the article's images; draws nothing until one is opened -->
+              <page-image-lightbox :root="pageContents" />
               <!--
                 A box of its own rather than a bare `<template>`, so that `css/_print.scss` has something
                 to hide: these are links onward -- the next page, the previous one, a related topic --
@@ -777,6 +779,7 @@ import FooterNav from '@/components/FooterNav.vue'
 import LoadingGeneric from '@/components/LoadingGeneric.vue'
 import PageActionsCol from '@/components/PageActionsCol.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PageImageLightbox from '@/components/PageImageLightbox.vue'
 import PageRedirect from '@/components/PageRedirect.vue'
 import PageTags from '@/components/PageTags.vue'
 import PageToc from '@/components/PageToc.vue'

@@ -70,6 +70,17 @@ export const SYSTEM_SCHEDULE: SystemScheduleEntry[] = [
   // -> Every three hours, off the hour: the index of where each file is used, which the file manager
   //    shows. It is rebuilt whole each time, so a page saved in between shows up at the next run
   { task: 'rescanAssetUsages', cron: '15 */3 * * *' },
+  /*
+    Fork: the scaled-down copies of images that never came through an upload (an import, a storage
+    sync), or that this instance's cache has lost. Every 15 minutes, off the quarter hours: a run is
+    capped at `files.variants.reconcileBudget`, so a large backlog -- a whole wiki's images after the
+    feature arrives -- is worked through in slices, and a fresh container of an HA set is not left
+    serving full-size originals for an hour. A run with nothing to do is one query and one listing.
+  */
+  { task: 'reconcileImageVariants', cron: '7,22,37,52 * * * *' },
+  // -> Fork: adds `srcset` to stored renders, including widths the reconcile above has just filled in.
+  //    Hourly at :29, a minute none of the reconcile's runs start on
+  { task: 'describeRenderImages', cron: '29 * * * *' },
   // -> Every minute, and the task decides which sites are actually due: the interval is a per-site
   //    setting, so the tick has to be as fine as the shortest one anybody can ask for
   { task: 'syncStorageTargets', cron: '* * * * *' }

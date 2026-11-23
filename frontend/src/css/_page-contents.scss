@@ -1820,6 +1820,20 @@
     animation: content-block-reveal 0s 4s forwards;
   }
 
+  /*
+    Fork: and the lazy pictures inside such a block, out of the layout altogether until it has loaded.
+    Hidden is not enough for them: a hidden image is still laid out, so a lazy one near the top of the
+    page loads straight away -- at the width it has BEFORE the block lays it out. A card's picture is
+    laid out the whole column wide until the cards block arrives, and with `sizes="auto"` the browser
+    fetched the copy for that width rather than for the card (see `.claude/rules/image-delivery.md`).
+    An image that is not rendered is not loaded at all, so it waits for the block, and then fetches
+    the copy its real box asks for. Back after the same few seconds as the block's own contents.
+  */
+  :not(:defined):not([data-block-disabled], [data-block-disabled] *) img[loading='lazy'] {
+    display: none;
+    animation: content-block-image-reveal 0s 4s forwards;
+  }
+
   /* -- highlight.js tokens ------------------------------------------------------ */
 
   .hljs-comment,
@@ -2159,6 +2173,26 @@
   */
   li img {
     display: inline-block;
+  }
+
+  /*
+    An image the lightbox can enlarge (`PageImageLightbox.vue` marks it): the cursor is the only hint,
+    plus a barely-there dim on hover. The focus ring shows for the keyboard only.
+  */
+  img[data-enlargeable] {
+    cursor: zoom-in;
+    transition: opacity 0.15s ease;
+
+    &:hover {
+      opacity: 0.94;
+    }
+    &:focus {
+      outline: none;
+    }
+    &:focus-visible {
+      outline: 2px solid var(--q-primary, currentColor);
+      outline-offset: 2px;
+    }
   }
 
   /* The alignment classes an author can attach through `markdown-it-attrs` */
@@ -2679,6 +2713,13 @@
 @keyframes content-block-reveal {
   to {
     visibility: visible;
+  }
+}
+
+/* -> Its lazy pictures, likewise -- see `img[loading='lazy']` under `:not(:defined)` above */
+@keyframes content-block-image-reveal {
+  to {
+    display: inline;
   }
 }
 

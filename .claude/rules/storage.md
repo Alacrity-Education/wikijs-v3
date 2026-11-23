@@ -308,3 +308,5 @@ default author in every case regardless: it is the repository's own `user.name`/
 
 Not to be confused with `<dataPath>/cache/files`, the serving cache in the assets model. That one is
 derived and swept; a storage target is where content actually lives.
+Likewise `<dataPath>/cache/variants`, the scaled-down copies of images served for `/_files/…?w=` — see
+[Image delivery](image-delivery.md).

@@ -36,6 +36,21 @@ defaults:
       # Trimmed back oldest-first once it is exceeded. Set to 0 to serve every request from the
       # database instead.
       cacheMaxSize: 536870912
+      # Fork: scaled-down WebP copies of uploaded images, served at /_files/<path>?w=<width>. Made in the
+      # background after an upload and by a scheduled job, never while a reader waits.
+      variants:
+        enabled: true
+        # WebP quality of a lossy copy. A PNG drawn with few colours (a screenshot, a diagram) is copied
+        # losslessly regardless of what this says.
+        quality: 80
+        # How many images are encoded at once on this instance, each in its own process on one thread.
+        concurrency: 2
+        # How much of <dataPath>/cache/variants the copies may take up, in bytes. Separate from the
+        # file cache above, so that ordinary reads cannot evict copies that take seconds to remake.
+        cacheMaxSize: 1073741824
+        # How long, in seconds, one run of the scheduled job keeps queuing images before it stops and
+        # leaves the rest to the next run. Below scheduler.taskTimeout, so a run is never cut short.
+        reconcileBudget: 180
     scheduler:
       workers: 3
       pollingCheck: 5

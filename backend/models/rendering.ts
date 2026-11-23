@@ -1,15 +1,17 @@
 import { createHash } from 'node:crypto'
 import * as cheerio from 'cheerio'
 import sanitizeHtml from 'sanitize-html'
-import { asc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { flipFromString, rotateFromString } from '@iconify/utils'
 import {
   jobs as jobsTable,
   pageRenderQueue as renderQueueTable,
   pages as pagesTable
 } from '../db/schema.ts'
+import { invalidateAppShellCache } from '../helpers/appShell.ts'
 import { CustomError } from '../helpers/common.ts'
 import { hrefsFrom } from '../helpers/pageLinks.ts'
+import { describeImages } from '../helpers/renderImages.ts'
 import { sanitizeRender } from '../helpers/sanitizeRender.ts'
 import type { IconifyIcon } from '@iconify/types'
 import type { RenderableBlocks } from './blocks.ts'
@@ -248,6 +250,8 @@ class Rendering {
     this.unwrapOrphanedChildBlocks($, siteBlocks)
     this.liftIconChildren($)
     await this.inlineIcons($)
+    // -> Fork: `srcset`, `sizes`, the picture's own size and lazy loading -- see `helpers/renderImages.ts`
+    await describeImages($, siteId)
     const toc = this.anchorHeadings($)
 
     return {
@@ -1000,6 +1004,60 @@ class Rendering {
       this.inheritedPermissions(page.render)
     )
     return 'stored'
+  }
+
+  /**
+   * Fork: bring the pictures of stored renders up to what `describeImages` says of them now, a batch of
+   * pages at a time, without a browser.
+   *
+   * What the `describeRenderImages` task runs. A render saved before the step existed has no `srcset`;
+   * one whose picture was uploaded after the page named it, or replaced at another size, or whose
+   * site's content width changed, has a stale one. Only that step is run, not the whole of
+   * `postProcess`: the rest of it was already applied when the render was stored, and running the
+   * sanitiser again over every page in bulk would apply today's block switches and permissions to
+   * content nobody touched -- a decision for a save or a re-render, not for this. Nothing else is
+   * derived from the attributes it writes, so the search text, the contents and the links stay as they
+   * are and nothing is re-indexed.
+   *
+   * A render is written back only when a picture in it changed, and only if it is still the render that
+   * was read: a page saved in between keeps its save, which went through `postProcess` anyway. Nothing
+   * but `render` is written, `updatedAt` included, for the reason `pages.storeRender` gives.
+   *
+   * @param afterId Where the previous batch stopped; pages are taken in id order
+   * @returns The last page looked at (null once there are none left), and how many renders changed
+   */
+  async describeStoredImages(
+    afterId: string | null,
+    limit: number
+  ): Promise<{ lastId: string | null; updated: number }> {
+    const rows = await WIKI.db
+      .select({ id: pagesTable.id, siteId: pagesTable.siteId, render: pagesTable.render })
+      .from(pagesTable)
+      .where(afterId ? gt(pagesTable.id, afterId) : undefined)
+      .orderBy(asc(pagesTable.id))
+      .limit(limit)
+
+    let updated = 0
+    for (const row of rows) {
+      if (!row.render?.includes('/_files/')) {
+        continue
+      }
+      const $ = cheerio.load(row.render, null, false)
+      if (!(await describeImages($, row.siteId))) {
+        continue
+      }
+      const written = await WIKI.db
+        .update(pagesTable)
+        .set({ render: $.html() })
+        .where(and(eq(pagesTable.id, row.id), eq(pagesTable.render, row.render)))
+        .returning({ id: pagesTable.id })
+      updated += written.length
+    }
+    if (updated > 0) {
+      // -> The column the injected copy of a page is made from
+      invalidateAppShellCache()
+    }
+    return { lastId: rows.length < limit ? null : rows[rows.length - 1].id, updated }
   }
 
   /**

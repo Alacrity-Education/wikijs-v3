@@ -103,7 +103,7 @@ literal and assert it to `WikiGlobal`, since each populates the object progressi
 `backend/types/fastify.d.ts` augments Fastify: session fields (`authenticated`, `user`,
 `permissions`) and the per-route `config.permissions` used by the `preParsing` permission hook.
 
-**Four dynamic paths are extension-sensitive** and invisible to the type checker — they must be
+**Five dynamic paths are extension-sensitive** and invisible to the type checker — they must be
 updated by hand if the files they point at are ever renamed:
 
 - `core/scheduler.ts` → `path.join(WIKI.SERVERPATH, 'worker.ts')` (the poolifier pool entry)
@@ -111,6 +111,8 @@ updated by hand if the files they point at are ever renamed:
 - `models/authentication.ts` → `import('../modules/authentication/${stg.module}/authentication.ts')`
 - `models/storage.ts` → `import('../modules/storage/${key}/storage.ts')`, plus the `storage.ts`
   presence check in `hasImplementation()` that gates it
+- `models/assetVariants.ts` → `fork(path.join(WIKI.SERVERPATH, 'helpers/imageVariantEncoder.ts'))`
+  (the image copy encoder, a child process -- see [Image delivery](../.claude/rules/image-delivery.md))
 
 `scheduler.ts` reads `tasks/simple/` filenames with `/\.[jt]s$/`, so task files are extension-agnostic.
 
